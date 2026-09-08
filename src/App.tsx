@@ -7,6 +7,7 @@ import Markets from './pages/Markets';
 import Watchlist from './pages/Watchlist';
 import Portfolio from './pages/Portfolio';
 import Settings from './pages/Settings';
+import StockDetail from './pages/StockDetail';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
               <Route path="/watchlist" element={<Watchlist />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/stock/:symbol" element={<StockDetail />} />
             </Routes>
           </main>
         </div>

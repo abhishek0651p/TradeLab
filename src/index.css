@@ -276,3 +276,422 @@ tr:hover td {
   margin-bottom: 8px;
   font-size: 1.25rem;
 }
+
+/* Clickable stock rows */
+.stock-row-clickable {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.stock-row-clickable:hover td {
+  background-color: rgba(59, 130, 246, 0.06) !important;
+}
+
+/* ==============================================
+   Stock Detail Page — Day 2
+   ============================================== */
+
+.stock-detail-page {
+  max-width: 1100px;
+}
+
+.back-btn {
+  margin-bottom: 24px;
+  font-size: 0.9rem;
+}
+
+/* Header */
+.sd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 28px;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.sd-header-top-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
+
+.sd-company-name {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sd-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.sd-badge {
+  font-size: 0.65rem;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.sd-badge-exchange {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: var(--primary);
+}
+
+.sd-badge-sector {
+  background-color: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+}
+
+.sd-badge-simulated {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+  font-size: 0.6rem;
+}
+
+.sd-symbol-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sd-symbol {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sd-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sd-price {
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-main);
+}
+
+.sd-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 8px;
+}
+
+.sd-positive {
+  color: var(--success);
+}
+
+.sd-positive.sd-change {
+  background-color: rgba(16, 185, 129, 0.1);
+}
+
+.sd-negative {
+  color: var(--danger);
+}
+
+.sd-negative.sd-change {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Watchlist Button */
+.sd-watchlist-btn {
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  border-radius: 10px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.sd-watchlist-added {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.sd-watchlist-added:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Chart Card */
+.sd-chart-card {
+  margin-bottom: 24px;
+  padding: 24px;
+}
+
+.sd-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.sd-chart-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.sd-chart-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.sd-chart-change-summary {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.sd-chart-area {
+  transition: opacity 0.2s ease;
+}
+
+.sd-chart-loading {
+  opacity: 0.4;
+}
+
+/* Timeframe Selector */
+.sd-timeframe-bar {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: 20px;
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  padding: 4px;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.sd-tf-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.3px;
+}
+
+.sd-tf-btn:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.sd-tf-active {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Metrics Grid */
+.sd-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.sd-metric-card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.2s ease;
+}
+
+.sd-metric-card:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.sd-metric-icon {
+  color: var(--primary);
+  margin-bottom: 4px;
+}
+
+.sd-metric-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sd-metric-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* Company Card */
+.sd-company-card {
+  margin-bottom: 24px;
+}
+
+.sd-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 20px;
+}
+
+.sd-company-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 24px;
+}
+
+.sd-company-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  min-width: 280px;
+}
+
+.sd-company-meta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.sd-company-meta-item svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.sd-meta-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.sd-meta-value {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-main);
+  margin-top: 2px;
+}
+
+.sd-about-text {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.sd-disclaimer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* Trade Card */
+.sd-trade-card {
+  padding: 32px;
+}
+
+.sd-trade-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.sd-trade-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 160px;
+  padding: 20px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: not-allowed;
+  opacity: 0.5;
+  transition: all 0.2s ease;
+  color: #fff;
+}
+
+.sd-trade-buy {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.sd-trade-sell {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.sd-trade-coming {
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.8;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .sd-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .sd-company-details {
+    grid-template-columns: 1fr;
+  }
+
+  .sd-header {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 600px) {
+  .sd-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sd-price {
+    font-size: 1.8rem;
+  }
+
+  .sd-company-meta {
+    grid-template-columns: 1fr;
+    min-width: unset;
+  }
+
+  .sd-trade-buttons {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .sd-trade-btn {
+    width: 100%;
+    max-width: 240px;
+  }
+}

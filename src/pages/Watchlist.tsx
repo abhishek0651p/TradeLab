@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import { Search, Star, Trash2 } from 'lucide-react';
 
 const Watchlist = () => {
   const { stocks, watchlist, removeFromWatchlist } = useTrading();
   const [searchTerm, setSearchTerm] = useState('');
+  const navigate = useNavigate();
 
   const watchlistStocks = stocks.filter(stock => watchlist.includes(stock.symbol));
   
@@ -51,7 +53,11 @@ const Watchlist = () => {
               </thead>
               <tbody>
                 {filteredStocks.map((stock) => (
-                  <tr key={stock.symbol}>
+                  <tr 
+                    key={stock.symbol}
+                    onClick={() => navigate(`/stock/${stock.symbol}`)}
+                    className="stock-row-clickable"
+                  >
                     <td>{stock.companyName}</td>
                     <td style={{ fontWeight: 600 }}>{stock.symbol}</td>
                     <td>{formatCurrency(stock.price)}</td>
@@ -64,7 +70,7 @@ const Watchlist = () => {
                     <td>
                       <button 
                         className="btn btn-outline" 
-                        onClick={() => removeFromWatchlist(stock.symbol)}
+                        onClick={(e) => { e.stopPropagation(); removeFromWatchlist(stock.symbol); }}
                         style={{ padding: '6px 12px', fontSize: '0.85rem', color: 'var(--danger)', borderColor: 'var(--danger)' }}
                       >
                         <Trash2 size={16} /> Remove

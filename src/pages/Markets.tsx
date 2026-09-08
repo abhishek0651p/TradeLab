@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import { Search, Star, Plus } from 'lucide-react';
 
 const Markets = () => {
   const { stocks, watchlist, addToWatchlist, removeFromWatchlist } = useTrading();
   const [searchTerm, setSearchTerm] = useState('');
+  const navigate = useNavigate();
 
   const filteredStocks = stocks.filter(stock => 
     stock.symbol.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -33,6 +35,10 @@ const Markets = () => {
         />
       </div>
 
+      <div className="sidebar-tag" style={{ marginBottom: '16px', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)' }}>
+        SIMULATED MARKET DATA
+      </div>
+
       <div className="table-container">
         <table>
           <thead>
@@ -47,7 +53,11 @@ const Markets = () => {
           </thead>
           <tbody>
             {filteredStocks.map((stock) => (
-              <tr key={stock.symbol}>
+              <tr 
+                key={stock.symbol} 
+                onClick={() => navigate(`/stock/${stock.symbol}`)}
+                className="stock-row-clickable"
+              >
                 <td>{stock.companyName}</td>
                 <td style={{ fontWeight: 600 }}>{stock.symbol}</td>
                 <td>{formatCurrency(stock.price)}</td>
@@ -61,7 +71,7 @@ const Markets = () => {
                   {watchlist.includes(stock.symbol) ? (
                     <button 
                       className="btn btn-outline" 
-                      onClick={() => removeFromWatchlist(stock.symbol)}
+                      onClick={(e) => { e.stopPropagation(); removeFromWatchlist(stock.symbol); }}
                       style={{ padding: '6px 12px', fontSize: '0.85rem' }}
                     >
                       <Star size={16} fill="currentColor" /> Added
@@ -69,7 +79,7 @@ const Markets = () => {
                   ) : (
                     <button 
                       className="btn" 
-                      onClick={() => addToWatchlist(stock.symbol)}
+                      onClick={(e) => { e.stopPropagation(); addToWatchlist(stock.symbol); }}
                       style={{ padding: '6px 12px', fontSize: '0.85rem' }}
                     >
                       <Plus size={16} /> Watchlist
