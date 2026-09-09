@@ -1,3 +1,23 @@
+export type OrderSide = 'BUY' | 'SELL';
+
+export interface Holding {
+  symbol: string;
+  quantity: number;
+  averageBuyPrice: number;
+}
+
+export interface Trade {
+  id: string;
+  timestamp: string;
+  symbol: string;
+  companyName: string;
+  side: OrderSide;
+  quantity: number;
+  executionPrice: number;
+  totalValue: number;
+  realizedPnL: number | null;
+}
+
 export interface AccountState {
   startingBalance: number;
   cashBalance: number;

@@ -2,23 +2,126 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import { generateChartData } from '../data/mockData';
-import { Star, ArrowLeft, Plus, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag } from 'lucide-react';
+import { Star, ArrowLeft, Plus, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { ChartDataPoint } from '../types';
+import { ChartDataPoint, OrderSide } from '../types';
 
 type Timeframe = '1D' | '1W' | '1M' | '1Y';
+
+interface OrderEntryProps {
+  symbol: string;
+  companyName: string;
+  price: number;
+  side: OrderSide;
+  cashBalance: number;
+  quantityOnHand: number;
+  onClose: () => void;
+  onExecute: (quantity: number) => void;
+}
+
+const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, onClose, onExecute }) => {
+  const [quantity, setQuantity] = useState<string>('');
+  const [error, setError] = useState<string>('');
+
+  const quantityNum = Number(quantity);
+  const isQuantityValid = quantity.trim() !== '' && Number.isInteger(quantityNum) && quantityNum > 0;
+  const estimatedValue = isQuantityValid ? price * quantityNum : 0;
+
+  const handleExecute = () => {
+    if (!isQuantityValid) {
+      setError('Please enter a positive whole number for quantity.');
+      return;
+    }
+
+    onExecute(quantityNum);
+    onClose();
+  };
+
+  const sideLabel = side === 'BUY' ? 'BUY' : 'SELL';
+  const sideColor = side === 'BUY' ? 'var(--success)' : 'var(--danger)';
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h2 className="modal-title">Place {sideLabel} Order</h2>
+            <p className="modal-subtitle">{companyName} ({symbol})</p>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="order-summary">
+            <div className="order-summary-row">
+              <span>Current Simulated Price</span>
+              <strong>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(price)}</strong>
+            </div>
+            {side === 'BUY' ? (
+              <div className="order-summary-row">
+                <span>Available Cash</span>
+                <strong>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cashBalance)}</strong>
+              </div>
+            ) : (
+              <div className="order-summary-row">
+                <span>Shares Owned</span>
+                <strong>{quantityOnHand}</strong>
+              </div>
+            )}
+            <div className="order-summary-row">
+              <span>Estimated Order Value</span>
+              <strong style={{ color: sideColor }}>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(estimatedValue)}</strong>
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="order-quantity">Quantity</label>
+            <input
+              id="order-quantity"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="Enter quantity"
+              value={quantity}
+              onChange={(e) => {
+                setQuantity(e.target.value);
+                setError('');
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleExecute(); }}
+            />
+            {side === 'SELL' && <div className="field-hint">You own {quantityOnHand} shares of {symbol}</div>}
+            {side === 'BUY' && <div className="field-hint">Available cash: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cashBalance)}</div>}
+            {error && <div className="form-error">{error}</div>}
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn" style={{ backgroundColor: sideColor, borderColor: sideColor, color: '#fff' }} onClick={handleExecute} disabled={!isQuantityValid}>
+            Confirm {sideLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const StockDetail = () => {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
-  const { stocks, watchlist, addToWatchlist, removeFromWatchlist } = useTrading();
-  
+  const { stocks, watchlist, addToWatchlist, removeFromWatchlist, executeBuy, executeSell, account, holdings } = useTrading();
+
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [isChartLoading, setIsChartLoading] = useState(false);
+  const [orderModal, setOrderModal] = useState<{ side: OrderSide } | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const stock = stocks.find(s => s.symbol === symbol);
   const inWatchlist = symbol ? watchlist.includes(symbol) : false;
+  const holding = holdings.find(h => h.symbol === symbol);
 
   useEffect(() => {
     if (symbol) {
@@ -30,6 +133,12 @@ const StockDetail = () => {
       return () => clearTimeout(timer);
     }
   }, [symbol, timeframe]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const chartStats = useMemo(() => {
     if (chartData.length === 0) return { min: 0, max: 0, avg: 0, change: 0, changePercent: 0 };
@@ -59,10 +168,7 @@ const StockDetail = () => {
   }
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR'
-    }).format(value);
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(value);
   };
 
   const formatVolume = (value: number) => {
@@ -83,8 +189,32 @@ const StockDetail = () => {
     '1Y': 'Past Year',
   };
 
+  const handleOrderSubmit = (side: OrderSide, quantity: number) => {
+    if (side === 'BUY') {
+      const result = executeBuy(symbol!, quantity, stock.price, stock.companyName);
+      if (result.success) {
+        setToast({ type: 'success', message: 'Buy order for ' + quantity + ' ' + symbol + ' executed successfully at ' + formatCurrency(stock.price) + '.' });
+      } else {
+        setToast({ type: 'error', message: result.error || 'Order execution failed.' });
+      }
+    } else {
+      const result = executeSell(symbol!, quantity, stock.price, stock.companyName);
+      if (result.success) {
+        setToast({ type: 'success', message: 'Sell order for ' + quantity + ' ' + symbol + ' executed successfully at ' + formatCurrency(stock.price) + '.' });
+      } else {
+        setToast({ type: 'error', message: result.error || 'Order execution failed.' });
+      }
+    }
+  };
+
   return (
     <div className="stock-detail-page">
+      {toast && (
+        <div className={'toast ' + toast.type}>
+          {toast.type === 'success' ? '✓ ' : '✗ '}{toast.message}
+        </div>
+      )}
+
       {/* Back Navigation */}
       <button className="btn btn-outline back-btn" onClick={() => navigate(-1)}>
         <ArrowLeft size={16} /> Back
@@ -149,50 +279,50 @@ const StockDetail = () => {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
-              <XAxis 
-                dataKey="timestamp" 
-                stroke="var(--text-muted)" 
+              <XAxis
+                dataKey="timestamp"
+                stroke="var(--text-muted)"
                 fontSize={11}
                 tickMargin={10}
                 minTickGap={40}
                 axisLine={{ stroke: 'var(--border)' }}
                 tickLine={false}
               />
-              <YAxis 
-                domain={['auto', 'auto']} 
-                stroke="var(--text-muted)" 
+              <YAxis
+                domain={['auto', 'auto']}
+                stroke="var(--text-muted)"
                 fontSize={11}
                 tickFormatter={(val) => `₹${val.toLocaleString('en-IN')}`}
                 width={90}
                 axisLine={false}
                 tickLine={false}
               />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'var(--panel-bg)', 
-                  borderColor: 'var(--border)', 
-                  borderRadius: '10px', 
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'var(--panel-bg)',
+                  borderColor: 'var(--border)',
+                  borderRadius: '10px',
                   color: 'var(--text-main)',
                   boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                   padding: '12px 16px'
                 }}
                 itemStyle={{ color: chartColor, fontWeight: 600 }}
-                formatter={((value: any) => [formatCurrency(Number(value)), 'Price']) as any}
+                formatter={(value: any) => [formatCurrency(Number(value)), 'Price']}
                 labelStyle={{ color: 'var(--text-muted)', marginBottom: '6px', fontSize: '0.85rem' }}
               />
               {chartData.length > 0 && (
-                <ReferenceLine 
-                  y={chartData[0].price} 
-                  stroke="var(--text-muted)" 
-                  strokeDasharray="4 4" 
+                <ReferenceLine
+                  y={chartData[0].price}
+                  stroke="var(--text-muted)"
+                  strokeDasharray="4 4"
                   strokeOpacity={0.4}
                 />
               )}
-              <Area 
-                type="monotone" 
-                dataKey="price" 
-                stroke={chartColor} 
-                strokeWidth={2.5} 
+              <Area
+                type="monotone"
+                dataKey="price"
+                stroke={chartColor}
+                strokeWidth={2.5}
                 fill={`url(#gradient-${symbol})`}
                 dot={false}
                 activeDot={{ r: 5, fill: chartColor, stroke: 'var(--panel-bg)', strokeWidth: 2 }}
@@ -294,25 +424,36 @@ const StockDetail = () => {
         </div>
       </div>
 
-      {/* Trade Area - Coming in Day 3 */}
+      {/* Trade Area */}
       <div className="card sd-trade-card">
         <h3 className="sd-section-title" style={{ textAlign: 'center' }}>Trade {stock.symbol}</h3>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginBottom: '24px', fontSize: '0.9rem' }}>
-          Trading execution is coming in Day 3. For now, you can add this stock to your watchlist and analyze the price chart.
+          Execute market orders instantly at the current simulated price. All trades are simulated.
         </p>
         <div className="sd-trade-buttons">
-          <button className="sd-trade-btn sd-trade-buy" disabled>
+          <button className="sd-trade-btn sd-trade-buy" onClick={() => setOrderModal({ side: 'BUY' })}>
             <TrendingUp size={18} />
             Buy
-            <span className="sd-trade-coming">Coming in Day 3</span>
           </button>
-          <button className="sd-trade-btn sd-trade-sell" disabled>
+          <button className="sd-trade-btn sd-trade-sell" onClick={() => setOrderModal({ side: 'SELL' })}>
             <TrendingDown size={18} />
             Sell
-            <span className="sd-trade-coming">Coming in Day 3</span>
           </button>
         </div>
       </div>
+
+      {orderModal && (
+        <OrderEntry
+          symbol={symbol!}
+          companyName={stock.companyName}
+          price={stock.price}
+          side={orderModal.side}
+          cashBalance={account.cashBalance}
+          quantityOnHand={holding ? holding.quantity : 0}
+          onClose={() => setOrderModal(null)}
+          onExecute={(qty) => handleOrderSubmit(orderModal.side, qty)}
+        />
+      )}
     </div>
   );
 };
