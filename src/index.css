@@ -926,3 +926,164 @@ tr:hover td {
   cursor: not-allowed;
   transform: none;
 }
+
+/* ==============================================
+   Day 4: Orders & Trade History
+   ============================================== */
+
+.orders-page {
+  max-width: 1200px;
+}
+
+/* Summary Cards Grid */
+.orders-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.orders-summary-card {
+  padding: 20px;
+}
+
+/* Filter Bar */
+.orders-filter-bar {
+  margin-bottom: 24px;
+}
+
+.orders-filter-group {
+  display: flex;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  padding: 4px;
+  width: fit-content;
+}
+
+.orders-filter-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orders-filter-btn:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.orders-filter-active {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.orders-filter-count {
+  font-size: 0.7rem;
+  background-color: rgba(255, 255, 255, 0.15);
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.orders-filter-active .orders-filter-count {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Table */
+.orders-table-container {
+  overflow-x: auto;
+}
+
+.orders-table {
+  min-width: 800px;
+}
+
+/* Side Badges */
+.orders-side-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.orders-side-buy {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+
+.orders-side-sell {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+}
+
+/* Cell content */
+.orders-datetime {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.orders-date {
+  font-weight: 500;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.orders-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.orders-symbol {
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 0.95rem;
+}
+
+.orders-company {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Table Footer */
+.orders-table-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 24px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .orders-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .orders-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .orders-filter-group {
+    flex-wrap: wrap;
+  }
+}

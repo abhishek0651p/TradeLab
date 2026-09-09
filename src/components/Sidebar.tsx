@@ -24,11 +24,12 @@ const Sidebar = () => {
           <Briefcase size={20} /> Portfolio
         </NavLink>
         
+        <NavLink to="/orders" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <Clock size={20} /> Orders
+        </NavLink>
+
         {/* Future milestones */}
         <div style={{ marginTop: '24px', marginBottom: '8px', paddingLeft: '24px', fontSize: '0.75rem', color: 'var(--border)', fontWeight: 600 }}>COMING SOON</div>
-        <div className="nav-item" style={{ opacity: 0.5, cursor: 'not-allowed' }}>
-          <Clock size={20} /> Orders
-        </div>
         <div className="nav-item" style={{ opacity: 0.5, cursor: 'not-allowed' }}>
           <Activity size={20} /> Algo Trading
         </div>
