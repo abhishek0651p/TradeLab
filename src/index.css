@@ -1087,3 +1087,182 @@ tr:hover td {
     flex-wrap: wrap;
   }
 }
+
+/* ==============================================
+   Day 6: Watchlist & Market Discovery Upgrade
+   ============================================== */
+
+/* Summary Cards */
+.wl-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.wl-summary-card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wl-summary-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.wl-summary-icon-blue {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: var(--primary);
+}
+
+.wl-summary-icon-success {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+}
+
+.wl-summary-icon-danger {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}
+
+.wl-summary-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.wl-summary-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* Controls Bar */
+.wl-controls-bar {
+  margin-bottom: 24px;
+}
+
+.wl-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wl-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Sector Dropdown */
+.wl-sector-select {
+  background-color: var(--panel-bg);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  appearance: auto;
+}
+
+.wl-sector-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.wl-sector-select option {
+  background-color: var(--panel-bg);
+  color: var(--text-main);
+}
+
+/* Sortable Table Headers */
+.wl-sortable-th {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s;
+  white-space: nowrap;
+}
+
+.wl-sortable-th:hover {
+  color: var(--primary);
+}
+
+.wl-sort-icon-idle {
+  opacity: 0.35;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.wl-sort-icon-active {
+  color: var(--primary);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* No Results State */
+.wl-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.wl-no-results svg {
+  margin-bottom: 12px;
+  color: var(--border);
+}
+
+.wl-no-results h3 {
+  color: var(--text-main);
+  font-size: 1.15rem;
+  margin-bottom: 6px;
+}
+
+.wl-no-results p {
+  font-size: 0.9rem;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .wl-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .wl-filter-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .wl-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wl-summary-value {
+    font-size: 1.3rem;
+  }
+}
