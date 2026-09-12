@@ -4,9 +4,13 @@ import { useTrading } from '../context/TradingContext';
 import { generateChartData } from '../data/mockData';
 import { Star, ArrowLeft, Plus, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { ChartDataPoint, OrderSide } from '../types';
+import { ChartDataPoint, OrderSide, OrderType } from '../types';
 
 type Timeframe = '1D' | '1W' | '1M' | '1Y';
+
+// ──────────────────────────────────────────────
+// Order Entry Modal (Day 8 — upgraded with MARKET/LIMIT)
+// ──────────────────────────────────────────────
 
 interface OrderEntryProps {
   symbol: string;
@@ -16,29 +20,47 @@ interface OrderEntryProps {
   cashBalance: number;
   quantityOnHand: number;
   onClose: () => void;
-  onExecute: (quantity: number) => void;
+  onPlaceOrder: (orderType: OrderType, quantity: number, limitPrice?: number) => void;
 }
 
-const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, onClose, onExecute }) => {
+const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, onClose, onPlaceOrder }) => {
+  const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState<string>('');
+  const [limitPrice, setLimitPrice] = useState<string>('');
   const [error, setError] = useState<string>('');
 
   const quantityNum = Number(quantity);
+  const limitPriceNum = Number(limitPrice);
   const isQuantityValid = quantity.trim() !== '' && Number.isInteger(quantityNum) && quantityNum > 0;
-  const estimatedValue = isQuantityValid ? price * quantityNum : 0;
+  const isLimitPriceValid = orderType === 'MARKET' || (limitPrice.trim() !== '' && limitPriceNum > 0);
 
-  const handleExecute = () => {
+  const effectivePrice = orderType === 'MARKET' ? price : (isLimitPriceValid ? limitPriceNum : 0);
+  const estimatedValue = isQuantityValid ? effectivePrice * quantityNum : 0;
+
+  const canSubmit = isQuantityValid && isLimitPriceValid;
+
+  const handleSubmit = () => {
     if (!isQuantityValid) {
       setError('Please enter a positive whole number for quantity.');
       return;
     }
+    if (orderType === 'LIMIT' && !isLimitPriceValid) {
+      setError('Please enter a valid limit price greater than zero.');
+      return;
+    }
 
-    onExecute(quantityNum);
+    onPlaceOrder(orderType, quantityNum, orderType === 'LIMIT' ? limitPriceNum : undefined);
     onClose();
   };
 
   const sideLabel = side === 'BUY' ? 'BUY' : 'SELL';
   const sideColor = side === 'BUY' ? 'var(--success)' : 'var(--danger)';
+
+  const formatCurr = (v: number) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
+  const formatCurrShort = (v: number) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -54,28 +76,23 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
         </div>
 
         <div className="modal-body">
-          <div className="order-summary">
-            <div className="order-summary-row">
-              <span>Current Simulated Price</span>
-              <strong>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(price)}</strong>
-            </div>
-            {side === 'BUY' ? (
-              <div className="order-summary-row">
-                <span>Available Cash</span>
-                <strong>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cashBalance)}</strong>
-              </div>
-            ) : (
-              <div className="order-summary-row">
-                <span>Shares Owned</span>
-                <strong>{quantityOnHand}</strong>
-              </div>
-            )}
-            <div className="order-summary-row">
-              <span>Estimated Order Value</span>
-              <strong style={{ color: sideColor }}>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(estimatedValue)}</strong>
-            </div>
+          {/* Order Type Toggle */}
+          <div className="d8-order-type-toggle">
+            <button
+              className={`d8-order-type-option ${orderType === 'MARKET' ? 'd8-order-type-active' : ''}`}
+              onClick={() => { setOrderType('MARKET'); setError(''); }}
+            >
+              Market
+            </button>
+            <button
+              className={`d8-order-type-option ${orderType === 'LIMIT' ? 'd8-order-type-active' : ''}`}
+              onClick={() => { setOrderType('LIMIT'); setError(''); }}
+            >
+              Limit
+            </button>
           </div>
 
+          {/* Quantity Input */}
           <div className="form-field">
             <label htmlFor="order-quantity">Quantity</label>
             <input
@@ -85,22 +102,85 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
               step="1"
               placeholder="Enter quantity"
               value={quantity}
-              onChange={(e) => {
-                setQuantity(e.target.value);
-                setError('');
-              }}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleExecute(); }}
+              onChange={(e) => { setQuantity(e.target.value); setError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
             />
             {side === 'SELL' && <div className="field-hint">You own {quantityOnHand} shares of {symbol}</div>}
-            {side === 'BUY' && <div className="field-hint">Available cash: {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cashBalance)}</div>}
-            {error && <div className="form-error">{error}</div>}
+            {side === 'BUY' && <div className="field-hint">Available cash: {formatCurrShort(cashBalance)}</div>}
           </div>
+
+          {/* Limit Price Input (only for LIMIT orders) */}
+          {orderType === 'LIMIT' && (
+            <div className="form-field">
+              <label htmlFor="order-limit-price">Limit Price (₹)</label>
+              <input
+                id="order-limit-price"
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="Enter limit price"
+                value={limitPrice}
+                onChange={(e) => { setLimitPrice(e.target.value); setError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+              />
+              <div className="field-hint">
+                {side === 'BUY'
+                  ? 'Order will execute when market price ≤ limit price'
+                  : 'Order will execute when market price ≥ limit price'
+                }
+              </div>
+            </div>
+          )}
+
+          {error && <div className="form-error">{error}</div>}
+
+          {/* Order Preview */}
+          {canSubmit && (
+            <div className="order-summary d8-order-preview">
+              <div className="d8-preview-title">Order Preview</div>
+              <div className="order-summary-row">
+                <span>Side</span>
+                <strong style={{ color: sideColor }}>{sideLabel}</strong>
+              </div>
+              <div className="order-summary-row">
+                <span>Symbol</span>
+                <strong>{symbol}</strong>
+              </div>
+              <div className="order-summary-row">
+                <span>Order Type</span>
+                <strong>{orderType}</strong>
+              </div>
+              <div className="order-summary-row">
+                <span>Quantity</span>
+                <strong>{quantityNum} shares</strong>
+              </div>
+              {orderType === 'LIMIT' && (
+                <div className="order-summary-row">
+                  <span>Limit Price</span>
+                  <strong>{formatCurr(limitPriceNum)}</strong>
+                </div>
+              )}
+              <div className="order-summary-row">
+                <span>Current Market Price</span>
+                <strong>{formatCurr(price)}</strong>
+              </div>
+              <div className="order-summary-row">
+                <span>Estimated Value</span>
+                <strong style={{ color: sideColor }}>{formatCurrShort(estimatedValue)}</strong>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="modal-footer">
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn" style={{ backgroundColor: sideColor, borderColor: sideColor, color: '#fff' }} onClick={handleExecute} disabled={!isQuantityValid}>
-            Confirm {sideLabel}
+          <button
+            className="btn"
+            style={{ backgroundColor: sideColor, borderColor: sideColor, color: '#fff' }}
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+          >
+            {orderType === 'MARKET' ? 'Confirm ' + sideLabel : 'Place Limit ' + sideLabel}
           </button>
         </div>
       </div>
@@ -108,10 +188,14 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
   );
 };
 
+// ──────────────────────────────────────────────
+// Stock Detail Page
+// ──────────────────────────────────────────────
+
 const StockDetail = () => {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
-  const { stocks, watchlist, addToWatchlist, removeFromWatchlist, executeBuy, executeSell, account, holdings } = useTrading();
+  const { stocks, watchlist, addToWatchlist, removeFromWatchlist, placeOrder, account, holdings } = useTrading();
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -189,21 +273,33 @@ const StockDetail = () => {
     '1Y': 'Past Year',
   };
 
-  const handleOrderSubmit = (side: OrderSide, quantity: number) => {
-    if (side === 'BUY') {
-      const result = executeBuy(symbol!, quantity, stock.price, stock.companyName);
-      if (result.success) {
-        setToast({ type: 'success', message: 'Buy order for ' + quantity + ' ' + symbol + ' executed successfully at ' + formatCurrency(stock.price) + '.' });
+  const handleOrderSubmit = (side: OrderSide, orderType: OrderType, quantity: number, limitPrice?: number) => {
+    const result = placeOrder({
+      symbol: symbol!,
+      companyName: stock.companyName,
+      side,
+      orderType,
+      quantity,
+      limitPrice,
+      currentPrice: stock.price
+    });
+
+    if (result.success) {
+      if (result.execution) {
+        // Market order or limit order that filled immediately
+        setToast({
+          type: 'success',
+          message: 'Order executed successfully. ID: ' + (result.order?.id ?? '') + ' — Execution Price: ' + formatCurrency(result.execution.executionPrice)
+        });
       } else {
-        setToast({ type: 'error', message: result.error || 'Order execution failed.' });
+        // Limit order — pending
+        setToast({
+          type: 'success',
+          message: 'Limit order placed. ID: ' + (result.order?.id ?? '') + ' — Status: PENDING'
+        });
       }
     } else {
-      const result = executeSell(symbol!, quantity, stock.price, stock.companyName);
-      if (result.success) {
-        setToast({ type: 'success', message: 'Sell order for ' + quantity + ' ' + symbol + ' executed successfully at ' + formatCurrency(stock.price) + '.' });
-      } else {
-        setToast({ type: 'error', message: result.error || 'Order execution failed.' });
-      }
+      setToast({ type: 'error', message: result.error || 'Order failed.' });
     }
   };
 
@@ -428,7 +524,7 @@ const StockDetail = () => {
       <div className="card sd-trade-card">
         <h3 className="sd-section-title" style={{ textAlign: 'center' }}>Trade {stock.symbol}</h3>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginBottom: '24px', fontSize: '0.9rem' }}>
-          Execute market orders instantly at the current simulated price. All trades are simulated.
+          Place market or limit orders at simulated prices. All trades are virtual.
         </p>
         <div className="sd-trade-buttons">
           <button className="sd-trade-btn sd-trade-buy" onClick={() => setOrderModal({ side: 'BUY' })}>
@@ -451,7 +547,7 @@ const StockDetail = () => {
           cashBalance={account.cashBalance}
           quantityOnHand={holding ? holding.quantity : 0}
           onClose={() => setOrderModal(null)}
-          onExecute={(qty) => handleOrderSubmit(orderModal.side, qty)}
+          onPlaceOrder={(orderType, qty, lp) => handleOrderSubmit(orderModal.side, orderType, qty, lp)}
         />
       )}
     </div>

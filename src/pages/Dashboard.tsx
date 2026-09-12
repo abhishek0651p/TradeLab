@@ -1,8 +1,9 @@
 import React from 'react';
 import { useTrading } from '../context/TradingContext';
+import { Clock, Zap } from 'lucide-react';
 
 const Dashboard = () => {
-  const { account } = useTrading();
+  const { account, orders, trades } = useTrading();
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -15,6 +16,10 @@ const Dashboard = () => {
   const pnlPercent = account.investedValue > 0 
     ? ((account.portfolioValue - account.startingBalance) / account.startingBalance) * 100 
     : 0;
+
+  const pendingCount = orders.filter(o => o.status === 'PENDING').length;
+  const totalTrades = trades.length;
+  const hasActivity = pendingCount > 0 || totalTrades > 0;
 
   return (
     <div>
@@ -46,6 +51,36 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Trading Activity — only shown if there's activity */}
+      {hasActivity && (
+        <div className="d8-dashboard-activity">
+          <h2 className="d8-dashboard-activity-title">
+            <Zap size={18} />
+            Trading Activity
+          </h2>
+          <div className="d8-dashboard-activity-grid">
+            {pendingCount > 0 && (
+              <div className="card d8-dashboard-activity-card">
+                <div className="d8-activity-icon d8-activity-icon-pending">
+                  <Clock size={18} />
+                </div>
+                <div className="card-title">Pending Orders</div>
+                <div className="card-value" style={{ color: 'var(--warning, #f59e0b)' }}>{pendingCount}</div>
+                <div className="card-subtitle text-muted">Awaiting execution</div>
+              </div>
+            )}
+            <div className="card d8-dashboard-activity-card">
+              <div className="d8-activity-icon d8-activity-icon-trades">
+                <Zap size={18} />
+              </div>
+              <div className="card-title">Total Trades</div>
+              <div className="card-value">{totalTrades}</div>
+              <div className="card-subtitle text-muted">Executed transactions</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ marginTop: '32px' }}>
         <h2 style={{ marginBottom: '16px' }}>Paper Trading Notice</h2>

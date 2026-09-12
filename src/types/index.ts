@@ -1,4 +1,6 @@
 export type OrderSide = 'BUY' | 'SELL';
+export type OrderType = 'MARKET' | 'LIMIT';
+export type OrderStatus = 'PENDING' | 'EXECUTED' | 'CANCELLED' | 'REJECTED';
 
 export interface Holding {
   symbol: string;
@@ -16,6 +18,55 @@ export interface Trade {
   executionPrice: number;
   totalValue: number;
   realizedPnL: number | null;
+  orderId?: string;
+  executionId?: string;
+  orderType?: OrderType;
+}
+
+export interface Order {
+  id: string;
+  symbol: string;
+  companyName: string;
+  side: OrderSide;
+  type: OrderType;
+  quantity: number;
+  requestedPrice: number;
+  executionPrice: number | null;
+  totalValue: number | null;
+  status: OrderStatus;
+  createdAt: string;
+  executedAt: string | null;
+  cancelledAt: string | null;
+  rejectionReason: string | null;
+}
+
+export interface Execution {
+  id: string;
+  orderId: string;
+  symbol: string;
+  companyName: string;
+  side: OrderSide;
+  quantity: number;
+  executionPrice: number;
+  totalValue: number;
+  executedAt: string;
+}
+
+export interface PlaceOrderParams {
+  symbol: string;
+  companyName: string;
+  side: OrderSide;
+  orderType: OrderType;
+  quantity: number;
+  limitPrice?: number;
+  currentPrice: number;
+}
+
+export interface PlaceOrderResult {
+  success: boolean;
+  error?: string;
+  order?: Order;
+  execution?: Execution;
 }
 
 export interface AccountState {

@@ -1762,3 +1762,323 @@ tr:hover td {
     align-items: flex-start;
   }
 }
+
+/* ==============================================
+   Day 8: Professional Order Management
+   ============================================== */
+
+/* Summary grid — 7 cards */
+.d8-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* Tab Bar */
+.d8-tab-bar {
+  display: flex;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  padding: 4px;
+  width: fit-content;
+  margin-bottom: 24px;
+}
+
+.d8-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.d8-tab-btn:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.d8-tab-active {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.d8-tab-count {
+  font-size: 0.7rem;
+  background-color: rgba(255, 255, 255, 0.15);
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.d8-tab-active .d8-tab-count {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Filter Row */
+.d8-filter-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+/* Status Badges */
+.d8-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.order-status-pending {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+.order-status-executed {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+
+.order-status-cancelled {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
+}
+
+.order-status-rejected {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+}
+
+/* Type Badges */
+.d8-type-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.d8-type-market {
+  background-color: rgba(59, 130, 246, 0.12);
+  color: var(--primary);
+}
+
+.d8-type-limit {
+  background-color: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+/* Order ID cell */
+.d8-order-id {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* Cancel button */
+.d8-cancel-btn {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.d8-cancel-btn:hover {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+
+/* Process Pending button */
+.d8-process-btn {
+  background-color: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  font-size: 0.85rem;
+  padding: 8px 16px;
+}
+
+.d8-process-btn:hover {
+  background-color: rgba(139, 92, 246, 0.25);
+}
+
+/* Rejection details */
+.d8-rejection-detail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.d8-rejection-detail:last-child {
+  border-bottom: none;
+}
+
+/* ─── Order Modal Upgrades (Day 8) ─── */
+
+/* Order Type Toggle */
+.d8-order-type-toggle {
+  display: flex;
+  gap: 0;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 20px;
+}
+
+.d8-order-type-option {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.d8-order-type-option:hover {
+  color: var(--text-main);
+}
+
+.d8-order-type-active {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+}
+
+/* Order Preview in modal */
+.d8-order-preview {
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.d8-preview-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+
+/* Orders table extended */
+.d8-orders-table {
+  min-width: 1050px;
+}
+
+.d8-exec-table {
+  min-width: 950px;
+}
+
+/* ─── Dashboard Trading Activity (Day 8) ─── */
+
+.d8-dashboard-activity {
+  margin-top: 32px;
+}
+
+.d8-dashboard-activity-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 16px;
+}
+
+.d8-dashboard-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.d8-dashboard-activity-card {
+  padding: 20px;
+}
+
+.d8-activity-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.d8-activity-icon-pending {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.d8-activity-icon-trades {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: var(--primary);
+}
+
+/* ─── Day 8 Responsive ─── */
+
+@media (max-width: 900px) {
+  .d8-summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .d8-tab-bar {
+    flex-wrap: wrap;
+  }
+
+  .d8-filter-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .d8-orders-table {
+    min-width: 900px;
+  }
+
+  .d8-exec-table {
+    min-width: 800px;
+  }
+}
+
+@media (max-width: 600px) {
+  .d8-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .d8-tab-btn {
+    font-size: 0.8rem;
+    padding: 8px 14px;
+  }
+
+  .d8-dashboard-activity-grid {
+    grid-template-columns: 1fr;
+  }
+}
