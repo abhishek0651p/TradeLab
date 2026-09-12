@@ -57,6 +57,119 @@ const generateTradeId = (): string =>
 // Pure helper functions for state computation
 // ──────────────────────────────────────────────
 
+// ──────────────────────────────────────────────
+// State-transition guard
+// ──────────────────────────────────────────────
+
+const isValidTransition = (from: OrderStatus, to: OrderStatus): boolean => {
+  // No-op / self-transition
+  if (from === to) return from === 'PENDING' // PENDING→PENDING is "no-op" skip
+  // From PENDING we can go to any terminal state
+  if (from === 'PENDING') return true
+  // From terminal states, no outgoing allowed
+  return false
+}
+
+// ──────────────────────────────────────────────
+// Pure helper: revalidate a pending LIMIT order at execution time
+// ──────────────────────────────────────────────
+
+interface RevalidateResult {
+  valid: boolean
+  reason?: string
+}
+
+const revalidatePendingOrder = (
+  order: Order,
+  cashBalance: number,
+  holdings: Holding[],
+  stocks: StockData[]
+): RevalidateResult => {
+  // Must be LIMIT type and PENDING
+  if (order.type !== 'LIMIT' || order.status !== 'PENDING') {
+    return { valid: false, reason: 'Order is not a pending LIMIT order.' }
+  }
+
+  const stock = stocks.find(s => s.symbol === order.symbol)
+  if (!stock) {
+    return { valid: false, reason: 'Stock data not available.' }
+  }
+
+  const currentPrice = stock.price
+  const limitPrice = order.requestedPrice
+
+  // Check price condition (same logic as StockDetail modal)
+  const conditionMet =
+    (order.side === 'BUY' && currentPrice <= limitPrice) ||
+    (order.side === 'SELL' && currentPrice >= limitPrice)
+
+  if (!conditionMet) {
+    return { valid: false, reason: 'Limit price condition not met at time of execution. Current price differs from limit.' }
+  }
+
+  // Re-check cash for BUY
+  if (order.side === 'BUY') {
+    const requiredCash = currentPrice * order.quantity
+    if (cashBalance < requiredCash) {
+      return {
+        valid: false,
+        reason: `Insufficient cash at execution. Required: ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(requiredCash)} but available: ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cashBalance)}`
+      }
+    }
+  }
+
+  // Re-check holdings for SELL
+  if (order.side === 'SELL') {
+    const holding = holdings.find(h => h.symbol === order.symbol)
+    const availableQty = holding ? holding.quantity : 0
+    if (availableQty < order.quantity) {
+      return {
+        valid: false,
+        reason: `Insufficient holdings at execution. You own ${availableQty} shares of ${order.symbol} but need ${order.quantity}.`
+      }
+    }
+  }
+
+  return { valid: true }
+}
+
+// ──────────────────────────────────────────────
+// Pure helper: compute account metrics
+// ──────────────────────────────────────────────
+
+const computeAccountMetrics = (
+  cashBalance: number,
+  newHoldings: Holding[],
+  stocksList: StockData[],
+  prevRealizedPnL: number
+): AccountState => {
+  let investedValue = 0
+  let totalCostBasis = 0
+  let totalCurrentValue = 0
+  newHoldings.forEach(h => {
+    const stock = stocksList.find(s => s.symbol === h.symbol)
+    const currentPrice = stock ? stock.price : h.averageBuyPrice
+    investedValue += currentPrice * h.quantity
+    totalCostBasis += h.averageBuyPrice * h.quantity
+    totalCurrentValue += currentPrice * h.quantity
+  })
+  return {
+    startingBalance: INITIAL_ACCOUNT_STATE.startingBalance,
+    cashBalance,
+    investedValue,
+    portfolioValue: cashBalance + investedValue,
+    realizedPnL: prevRealizedPnL,
+    unrealizedPnL: totalCurrentValue - totalCostBasis
+  }
+}
+
+// ──────────────────────────────────────────────
+// Original helpers (unchanged)
+// ──────────────────────────────────────────────
+
+const formatINR = (v: number): string =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v)
+
 const computeBuyHoldings = (prevHoldings: Holding[], symbol: string, quantity: number, price: number): Holding[] => {
   const existing = prevHoldings.find(h => h.symbol === symbol);
   if (existing) {
@@ -93,31 +206,7 @@ const computeSellPositions = (prevPositions: PortfolioPosition[], symbol: string
   return prevPositions.map(p => p.symbol === symbol ? { ...p, quantity: newQty } : p);
 };
 
-const computeAccountMetrics = (
-  cashBalance: number,
-  newHoldings: Holding[],
-  stocksList: StockData[],
-  prevRealizedPnL: number
-): AccountState => {
-  let investedValue = 0;
-  let totalCostBasis = 0;
-  let totalCurrentValue = 0;
-  newHoldings.forEach(h => {
-    const stock = stocksList.find(s => s.symbol === h.symbol);
-    const currentPrice = stock ? stock.price : h.averageBuyPrice;
-    investedValue += currentPrice * h.quantity;
-    totalCostBasis += h.averageBuyPrice * h.quantity;
-    totalCurrentValue += currentPrice * h.quantity;
-  });
-  return {
-    startingBalance: INITIAL_ACCOUNT_STATE.startingBalance,
-    cashBalance,
-    investedValue,
-    portfolioValue: cashBalance + investedValue,
-    realizedPnL: prevRealizedPnL,
-    unrealizedPnL: totalCurrentValue - totalCostBasis
-  };
-};
+
 
 // ──────────────────────────────────────────────
 // Validation
@@ -128,8 +217,7 @@ interface ValidationResult {
   error?: string;
 }
 
-const formatINR = (v: number): string =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v);
+
 
 const validateOrder = (
   params: PlaceOrderParams,
@@ -230,6 +318,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const positionsRef = useRef(positions);
   const stocksRef = useRef(stocks);
   const ordersRef = useRef(orders);
+  const isProcessingRef = useRef(false);
 
   useEffect(() => { accountRef.current = account; }, [account]);
   useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
@@ -300,6 +389,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       newHoldings = computeSellHoldings(prevHoldings, order.symbol, order.quantity);
       newPositions = computeSellPositions(prevPositions, order.symbol, order.quantity);
       newCash = currentAccount.cashBalance + execution.totalValue;
+    }
+
+    // Defensive: ensure cash never goes negative (should be caught by validation, but belt-and-suspenders)
+    if (newCash < 0) {
+      console.warn('[executeOrderInternal] Negative cash detected, clamping to 0', { orderId: order.id, newCash });
+      newCash = 0;
     }
 
     const newAccount = computeAccountMetrics(
@@ -450,8 +545,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Order not found.' };
     }
 
-    if (order.status !== 'PENDING') {
-      return { success: false, error: 'Only pending orders can be cancelled. This order is ' + order.status + '.' };
+    // Enforce state-transition rules: only PENDING → CANCELLED is valid
+    if (!isValidTransition(order.status, 'CANCELLED')) {
+      return {
+        success: false,
+        error: 'Invalid cancel. Orders in ' + order.status + ' state cannot be cancelled.'
+      };
     }
 
     const cancelledOrder: Order = {
@@ -467,17 +566,25 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // ── processPendingOrders ──
 
   const processPendingOrders = useCallback((): { processed: number; executed: number; rejected: number } => {
+    // Prevent re-entrant / duplicate processing
+    if (isProcessingRef.current) {
+      return { processed: 0, executed: 0, rejected: 0 };
+    }
+    isProcessingRef.current = true;
+
     const currentOrders = ordersRef.current;
     const currentStocks = stocksRef.current;
 
     const pendingOrders = currentOrders.filter(o => o.status === 'PENDING' && o.type === 'LIMIT');
 
     if (pendingOrders.length === 0) {
+      isProcessingRef.current = false;
       return { processed: 0, executed: 0, rejected: 0 };
     }
 
     let executed = 0;
     let rejected = 0;
+    const processedIds = new Set<string>();
 
     // We need to process one at a time since each execution changes account state
     const updatedOrders = [...currentOrders];
@@ -485,58 +592,38 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newTrades: Trade[] = [];
 
     for (const pendingOrder of pendingOrders) {
-      const stock = currentStocks.find(s => s.symbol === pendingOrder.symbol);
-      if (!stock) continue;
+      // Duplicate execution prevention: skip if already processed in this batch
+      if (processedIds.has(pendingOrder.id)) continue;
 
-      const currentPrice = stock.price;
-      const limitPrice = pendingOrder.requestedPrice;
+      // Check current status in local working array (not just the snapshot)
+      const currentState = updatedOrders.find(o => o.id === pendingOrder.id);
+      if (!currentState || currentState.status !== 'PENDING' || currentState.type !== 'LIMIT') continue;
 
-      // Check limit condition
-      const conditionMet =
-        (pendingOrder.side === 'BUY' && currentPrice <= limitPrice) ||
-        (pendingOrder.side === 'SELL' && currentPrice >= limitPrice);
+      // Revalidate at execution time — this centralizes all checks
+      const revalidation = revalidatePendingOrder(
+        pendingOrder,
+        accountRef.current.cashBalance,
+        holdingsRef.current,
+        currentStocks
+      );
 
-      if (!conditionMet) continue;
-
-      // Re-validate at execution time
-      const latestAccount = accountRef.current;
-      const latestHoldings = holdingsRef.current;
-
-      if (pendingOrder.side === 'BUY') {
-        const requiredCash = currentPrice * pendingOrder.quantity;
-        if (latestAccount.cashBalance < requiredCash) {
-          // Reject — insufficient cash
-          const idx = updatedOrders.findIndex(o => o.id === pendingOrder.id);
-          if (idx >= 0) {
-            updatedOrders[idx] = {
-              ...pendingOrder,
-              status: 'REJECTED' as OrderStatus,
-              rejectionReason: 'Insufficient cash at time of execution. Required: ' + formatINR(requiredCash) + ' but available: ' + formatINR(latestAccount.cashBalance) + '.'
-            };
-          }
-          rejected++;
-          continue;
+      if (!revalidation.valid) {
+        // Rejected — order goes to REJECTED state, no state mutation
+        const idx = updatedOrders.findIndex(o => o.id === pendingOrder.id);
+        if (idx >= 0) {
+          updatedOrders[idx] = {
+            ...pendingOrder,
+            status: 'REJECTED' as OrderStatus,
+            rejectionReason: revalidation.reason ?? 'Order validation failed at execution.'
+          };
         }
-      }
-
-      if (pendingOrder.side === 'SELL') {
-        const holding = latestHoldings.find(h => h.symbol === pendingOrder.symbol);
-        const availableQty = holding ? holding.quantity : 0;
-        if (availableQty < pendingOrder.quantity) {
-          const idx = updatedOrders.findIndex(o => o.id === pendingOrder.id);
-          if (idx >= 0) {
-            updatedOrders[idx] = {
-              ...pendingOrder,
-              status: 'REJECTED' as OrderStatus,
-              rejectionReason: 'Insufficient holdings at time of execution. You own ' + availableQty + ' shares but need ' + pendingOrder.quantity + '.'
-            };
-          }
-          rejected++;
-          continue;
-        }
+        processedIds.add(pendingOrder.id);
+        rejected++;
+        continue;
       }
 
       // Execute
+      const currentPrice = currentStocks.find(s => s.symbol === pendingOrder.symbol)!.price;
       const result = executeOrderInternal(pendingOrder, currentPrice);
 
       // Update account/holdings/positions refs for subsequent orders
@@ -564,6 +651,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setPositions(result.newPositions);
       setAccount(result.newAccount);
 
+      processedIds.add(pendingOrder.id);
       executed++;
     }
 
@@ -576,7 +664,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setTrades(prev => [...newTrades.reverse(), ...prev]);
     }
 
-    return { processed: pendingOrders.length, executed, rejected };
+    // Only count orders whose condition was met (executed or rejected)
+    // Orders that don't meet the price condition stay PENDING and are not counted
+    isProcessingRef.current = false;
+    return { processed: executed + rejected, executed, rejected };
   }, [executeOrderInternal]);
 
   // ── Legacy executeBuy / executeSell — backward compatible wrappers ──

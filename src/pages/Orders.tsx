@@ -105,7 +105,10 @@ const Orders: React.FC = () => {
   // ── Cancel handler ──
 
   const handleCancel = (orderId: string) => {
-    cancelOrder(orderId);
+    const result = cancelOrder(orderId);
+    if (!result.success) {
+      window.alert(result.error);
+    }
   };
 
   // ── Process pending orders ──
@@ -233,6 +236,7 @@ const Orders: React.FC = () => {
                     <th style={{ textAlign: 'right' }}>Req. Price</th>
                     <th style={{ textAlign: 'right' }}>Exec. Price</th>
                     <th>Status</th>
+                    <th>Reason</th>
                     <th style={{ textAlign: 'center' }}>Action</th>
                   </tr>
                 </thead>
@@ -275,6 +279,14 @@ const Orders: React.FC = () => {
                           {getStatusIcon(order.status)}
                           {order.status}
                         </span>
+                      </td>
+                      <td>
+                        {order.status === 'REJECTED' && order.rejectionReason && (
+                          <span className="d8-rejection-cell" title={order.rejectionReason}>
+                            {order.rejectionReason}
+                          </span>
+                        )}
+                        {order.status !== 'REJECTED' && <span className="text-muted">—</span>}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {order.status === 'PENDING' ? (

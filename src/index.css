@@ -1937,6 +1937,19 @@ tr:hover td {
   border-bottom: none;
 }
 
+/* Inline rejection reason in order table */
+.d8-rejection-cell {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 /* ─── Order Modal Upgrades (Day 8) ─── */
 
 /* Order Type Toggle */
