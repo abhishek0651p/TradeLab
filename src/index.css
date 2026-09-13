@@ -1849,6 +1849,11 @@ tr:hover td {
   color: #f59e0b;
 }
 
+.order-status-triggered {
+  background-color: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
 .order-status-executed {
   background-color: rgba(16, 185, 129, 0.12);
   color: var(--success);
@@ -1883,6 +1888,21 @@ tr:hover td {
 .d8-type-limit {
   background-color: rgba(139, 92, 246, 0.12);
   color: #8b5cf6;
+}
+
+.d8-type-stop-market {
+  background-color: rgba(236, 72, 153, 0.12);
+  color: #ec4899;
+}
+
+.d8-type-stop-limit {
+  background-color: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+}
+
+.d8-type-target {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: #10b981;
 }
 
 /* Order ID cell */

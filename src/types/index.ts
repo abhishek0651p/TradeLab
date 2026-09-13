@@ -1,6 +1,6 @@
 export type OrderSide = 'BUY' | 'SELL';
-export type OrderType = 'MARKET' | 'LIMIT';
-export type OrderStatus = 'PENDING' | 'EXECUTED' | 'CANCELLED' | 'REJECTED';
+export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'STOP_LIMIT' | 'TARGET';
+export type OrderStatus = 'PENDING' | 'TRIGGERED' | 'EXECUTED' | 'CANCELLED' | 'REJECTED';
 
 export interface Holding {
   symbol: string;
@@ -31,6 +31,7 @@ export interface Order {
   type: OrderType;
   quantity: number;
   requestedPrice: number;
+  triggerPrice?: number;
   executionPrice: number | null;
   totalValue: number | null;
   status: OrderStatus;
@@ -59,6 +60,7 @@ export interface PlaceOrderParams {
   orderType: OrderType;
   quantity: number;
   limitPrice?: number;
+  triggerPrice?: number;
   currentPrice: number;
 }
 

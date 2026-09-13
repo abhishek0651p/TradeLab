@@ -63,15 +63,17 @@ const generateTradeId = (): string =>
 
 const isValidTransition = (from: OrderStatus, to: OrderStatus): boolean => {
   // No-op / self-transition
-  if (from === to) return from === 'PENDING' // PENDING→PENDING is "no-op" skip
-  // From PENDING we can go to any terminal state
-  if (from === 'PENDING') return true
+  if (from === to) return from === 'PENDING' || from === 'TRIGGERED'
+  // From PENDING we can go to TRIGGERED or terminal states
+  if (from === 'PENDING') return to === 'TRIGGERED' || to === 'EXECUTED' || to === 'CANCELLED' || to === 'REJECTED'
+  // From TRIGGERED we can go to terminal states (NO CANCELLATION allowed per Day 11 fix)
+  if (from === 'TRIGGERED') return to === 'EXECUTED' || to === 'REJECTED'
   // From terminal states, no outgoing allowed
   return false
 }
 
 // ──────────────────────────────────────────────
-// Pure helper: revalidate a pending LIMIT order at execution time
+// Pure helper: revalidate an order before final execution
 // ──────────────────────────────────────────────
 
 interface RevalidateResult {
@@ -79,33 +81,18 @@ interface RevalidateResult {
   reason?: string
 }
 
-const revalidatePendingOrder = (
+const revalidateExecution = (
   order: Order,
   cashBalance: number,
   holdings: Holding[],
   stocks: StockData[]
 ): RevalidateResult => {
-  // Must be LIMIT type and PENDING
-  if (order.type !== 'LIMIT' || order.status !== 'PENDING') {
-    return { valid: false, reason: 'Order is not a pending LIMIT order.' }
-  }
-
   const stock = stocks.find(s => s.symbol === order.symbol)
   if (!stock) {
     return { valid: false, reason: 'Stock data not available.' }
   }
 
   const currentPrice = stock.price
-  const limitPrice = order.requestedPrice
-
-  // Check price condition (same logic as StockDetail modal)
-  const conditionMet =
-    (order.side === 'BUY' && currentPrice <= limitPrice) ||
-    (order.side === 'SELL' && currentPrice >= limitPrice)
-
-  if (!conditionMet) {
-    return { valid: false, reason: 'Limit price condition not met at time of execution. Current price differs from limit.' }
-  }
 
   // Re-check cash for BUY
   if (order.side === 'BUY') {
@@ -231,7 +218,7 @@ const validateOrder = (
   }
 
   // Validate order type
-  if (params.orderType !== 'MARKET' && params.orderType !== 'LIMIT') {
+  if (!['MARKET', 'LIMIT', 'STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(params.orderType)) {
     return { valid: false, error: 'Invalid order type.' };
   }
 
@@ -246,17 +233,45 @@ const validateOrder = (
     return { valid: false, error: 'Quantity must be a positive whole number.' };
   }
 
-  // Validate limit price for LIMIT orders
-  if (params.orderType === 'LIMIT') {
+  // Validate limit price for LIMIT / STOP_LIMIT orders
+  if (['LIMIT', 'STOP_LIMIT'].includes(params.orderType)) {
     if (params.limitPrice === undefined || params.limitPrice === null || params.limitPrice <= 0) {
       return { valid: false, error: 'Limit price must be greater than zero.' };
     }
   }
 
+  // Validate trigger price for STOP / TARGET orders
+  if (['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(params.orderType)) {
+    if (params.triggerPrice === undefined || params.triggerPrice === null || params.triggerPrice <= 0) {
+      return { valid: false, error: 'Trigger price must be greater than zero.' };
+    }
+
+    // Logic constraints
+    if (params.orderType === 'STOP_MARKET' || params.orderType === 'STOP_LIMIT') {
+      if (params.side === 'BUY' && params.triggerPrice <= params.currentPrice) {
+        return { valid: false, error: 'Buy Stop trigger must be above current market price.' };
+      }
+      if (params.side === 'SELL' && params.triggerPrice >= params.currentPrice) {
+        return { valid: false, error: 'Sell Stop trigger must be below current market price.' };
+      }
+    }
+    if (params.orderType === 'TARGET') {
+      if (params.side === 'BUY' && params.triggerPrice >= params.currentPrice) {
+        return { valid: false, error: 'Buy Target trigger must be below current market price.' };
+      }
+      if (params.side === 'SELL' && params.triggerPrice <= params.currentPrice) {
+        return { valid: false, error: 'Sell Target trigger must be above current market price.' };
+      }
+    }
+  }
+
   // Validate cash for BUY
   if (params.side === 'BUY') {
-    const price = params.orderType === 'MARKET' ? params.currentPrice : (params.limitPrice ?? params.currentPrice);
-    const requiredCash = price * params.quantity;
+    let checkPrice = params.currentPrice;
+    if (params.orderType === 'LIMIT' || params.orderType === 'STOP_LIMIT') checkPrice = params.limitPrice!;
+    else if (params.orderType === 'STOP_MARKET' || params.orderType === 'TARGET') checkPrice = params.triggerPrice!;
+
+    const requiredCash = checkPrice * params.quantity;
     if (cashBalance < requiredCash) {
       return {
         valid: false,
@@ -466,6 +481,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       type: params.orderType,
       quantity: params.quantity,
       requestedPrice,
+      triggerPrice: params.triggerPrice,
       executionPrice: null,
       totalValue: null,
       status: 'PENDING' as OrderStatus,
@@ -575,9 +591,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const currentOrders = ordersRef.current;
     const currentStocks = stocksRef.current;
 
-    const pendingOrders = currentOrders.filter(o => o.status === 'PENDING' && o.type === 'LIMIT');
+    const evaluatableOrders = currentOrders.filter(o => o.status === 'PENDING' || (o.status === 'TRIGGERED' && o.type === 'STOP_LIMIT'));
 
-    if (pendingOrders.length === 0) {
+    if (evaluatableOrders.length === 0) {
       isProcessingRef.current = false;
       return { processed: 0, executed: 0, rejected: 0 };
     }
@@ -591,17 +607,56 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newExecutions: Execution[] = [];
     const newTrades: Trade[] = [];
 
-    for (const pendingOrder of pendingOrders) {
+    for (const order of evaluatableOrders) {
       // Duplicate execution prevention: skip if already processed in this batch
-      if (processedIds.has(pendingOrder.id)) continue;
+      if (processedIds.has(order.id)) continue;
 
       // Check current status in local working array (not just the snapshot)
-      const currentState = updatedOrders.find(o => o.id === pendingOrder.id);
-      if (!currentState || currentState.status !== 'PENDING' || currentState.type !== 'LIMIT') continue;
+      const currentState = updatedOrders.find(o => o.id === order.id);
+      if (!currentState || (currentState.status !== 'PENDING' && currentState.status !== 'TRIGGERED')) continue;
 
-      // Revalidate at execution time — this centralizes all checks
-      const revalidation = revalidatePendingOrder(
-        pendingOrder,
+      const stock = currentStocks.find(s => s.symbol === order.symbol);
+      if (!stock) continue;
+      const currentPrice = stock.price;
+
+      // 1. Evaluate Conditions
+      let conditionMet = false;
+      let newStatus: OrderStatus | null = null;
+
+      if (currentState.status === 'PENDING') {
+        if (currentState.type === 'LIMIT') {
+          if (currentState.side === 'BUY' && currentPrice <= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
+          if (currentState.side === 'SELL' && currentPrice >= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
+        } else if (currentState.type === 'STOP_MARKET') {
+          if (currentState.side === 'BUY' && currentPrice >= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
+          if (currentState.side === 'SELL' && currentPrice <= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
+        } else if (currentState.type === 'TARGET') {
+          if (currentState.side === 'BUY' && currentPrice <= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
+          if (currentState.side === 'SELL' && currentPrice >= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
+        } else if (currentState.type === 'STOP_LIMIT') {
+          if (currentState.side === 'BUY' && currentPrice >= currentState.triggerPrice!) { conditionMet = true; newStatus = 'TRIGGERED'; }
+          if (currentState.side === 'SELL' && currentPrice <= currentState.triggerPrice!) { conditionMet = true; newStatus = 'TRIGGERED'; }
+        }
+      } else if (currentState.status === 'TRIGGERED' && currentState.type === 'STOP_LIMIT') {
+        if (currentState.side === 'BUY' && currentPrice <= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
+        if (currentState.side === 'SELL' && currentPrice >= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
+      }
+
+      if (!conditionMet || !newStatus) continue;
+
+      // 2. If it's just transitioning to TRIGGERED (STOP_LIMIT)
+      if (newStatus === 'TRIGGERED') {
+        const idx = updatedOrders.findIndex(o => o.id === order.id);
+        if (idx >= 0) {
+          updatedOrders[idx] = { ...currentState, status: 'TRIGGERED' };
+        }
+        processedIds.add(order.id);
+        continue;
+      }
+
+      // 3. Revalidate before execution
+      const revalidation = revalidateExecution(
+        currentState,
         accountRef.current.cashBalance,
         holdingsRef.current,
         currentStocks
@@ -609,22 +664,21 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (!revalidation.valid) {
         // Rejected — order goes to REJECTED state, no state mutation
-        const idx = updatedOrders.findIndex(o => o.id === pendingOrder.id);
+        const idx = updatedOrders.findIndex(o => o.id === order.id);
         if (idx >= 0) {
           updatedOrders[idx] = {
-            ...pendingOrder,
+            ...currentState,
             status: 'REJECTED' as OrderStatus,
             rejectionReason: revalidation.reason ?? 'Order validation failed at execution.'
           };
         }
-        processedIds.add(pendingOrder.id);
+        processedIds.add(order.id);
         rejected++;
         continue;
       }
 
-      // Execute
-      const currentPrice = currentStocks.find(s => s.symbol === pendingOrder.symbol)!.price;
-      const result = executeOrderInternal(pendingOrder, currentPrice);
+      // 4. Execute
+      const result = executeOrderInternal(currentState, currentPrice);
 
       // Update account/holdings/positions refs for subsequent orders
       accountRef.current = result.newAccount;
@@ -632,10 +686,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       positionsRef.current = result.newPositions;
 
       // Mark order executed in our local array
-      const idx = updatedOrders.findIndex(o => o.id === pendingOrder.id);
+      const idx = updatedOrders.findIndex(o => o.id === order.id);
       if (idx >= 0) {
         updatedOrders[idx] = {
-          ...pendingOrder,
+          ...currentState,
           executionPrice: Number(currentPrice.toFixed(2)),
           totalValue: result.execution.totalValue,
           status: 'EXECUTED' as OrderStatus,
@@ -651,7 +705,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setPositions(result.newPositions);
       setAccount(result.newAccount);
 
-      processedIds.add(pendingOrder.id);
+      processedIds.add(order.id);
       executed++;
     }
 
@@ -664,8 +718,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setTrades(prev => [...newTrades.reverse(), ...prev]);
     }
 
-    // Only count orders whose condition was met (executed or rejected)
-    // Orders that don't meet the price condition stay PENDING and are not counted
     isProcessingRef.current = false;
     return { processed: executed + rejected, executed, rejected };
   }, [executeOrderInternal]);

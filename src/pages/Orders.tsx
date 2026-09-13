@@ -44,6 +44,7 @@ const Orders: React.FC = () => {
   const getStatusClass = (status: OrderStatus | string): string => {
     switch (status) {
       case 'PENDING': return 'order-status-pending';
+      case 'TRIGGERED': return 'order-status-triggered';
       case 'EXECUTED': return 'order-status-executed';
       case 'CANCELLED': return 'order-status-cancelled';
       case 'REJECTED': return 'order-status-rejected';
@@ -54,6 +55,7 @@ const Orders: React.FC = () => {
   const getStatusIcon = (status: OrderStatus | string) => {
     switch (status) {
       case 'PENDING': return <Clock size={12} />;
+      case 'TRIGGERED': return <Zap size={12} />;
       case 'EXECUTED': return <ShieldCheck size={12} />;
       case 'CANCELLED': return <XCircle size={12} />;
       case 'REJECTED': return <AlertTriangle size={12} />;
@@ -70,6 +72,7 @@ const Orders: React.FC = () => {
 
   const totalOrders = orders.length;
   const pendingCount = orders.filter(o => o.status === 'PENDING').length;
+  const triggeredCount = orders.filter(o => o.status === 'TRIGGERED').length;
   const executedCount = orders.filter(o => o.status === 'EXECUTED').length;
   const cancelledCount = orders.filter(o => o.status === 'CANCELLED').length;
   const rejectedCount = orders.filter(o => o.status === 'REJECTED').length;
@@ -130,7 +133,7 @@ const Orders: React.FC = () => {
       <h1 className="page-title">Trading Activity</h1>
 
       {/* Summary Cards */}
-      <div className="orders-summary-grid d8-summary-grid">
+      <div className="orders-summary-grid d8-summary-grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
         <div className="card orders-summary-card">
           <div className="card-title">Total Orders</div>
           <div className="card-value">{totalOrders}</div>
@@ -138,6 +141,10 @@ const Orders: React.FC = () => {
         <div className="card orders-summary-card">
           <div className="card-title">Pending</div>
           <div className="card-value" style={{ color: 'var(--warning, #f59e0b)' }}>{pendingCount}</div>
+        </div>
+        <div className="card orders-summary-card">
+          <div className="card-title">Triggered</div>
+          <div className="card-value" style={{ color: 'var(--primary, #3b82f6)' }}>{triggeredCount}</div>
         </div>
         <div className="card orders-summary-card">
           <div className="card-title">Executed</div>
@@ -150,10 +157,6 @@ const Orders: React.FC = () => {
         <div className="card orders-summary-card">
           <div className="card-title">Rejected</div>
           <div className="card-value text-danger">{rejectedCount}</div>
-        </div>
-        <div className="card orders-summary-card">
-          <div className="card-title">Total Trades</div>
-          <div className="card-value">{totalTrades}</div>
         </div>
         <div className="card orders-summary-card">
           <div className="card-title">Realized P&L</div>
@@ -184,7 +187,7 @@ const Orders: React.FC = () => {
           {/* Filter Row */}
           <div className="d8-filter-row">
             <div className="orders-filter-group">
-              {(['ALL', 'PENDING', 'EXECUTED', 'CANCELLED', 'REJECTED'] as OrderFilterStatus[]).map(status => (
+              {(['ALL', 'PENDING', 'TRIGGERED', 'EXECUTED', 'CANCELLED', 'REJECTED'] as OrderFilterStatus[]).map(status => (
                 <button
                   key={status}
                   className={`orders-filter-btn ${orderStatusFilter === status ? 'orders-filter-active' : ''}`}
@@ -259,8 +262,8 @@ const Orders: React.FC = () => {
                         </span>
                       </td>
                       <td>
-                        <span className={`d8-type-badge ${order.type === 'LIMIT' ? 'd8-type-limit' : 'd8-type-market'}`}>
-                          {order.type}
+                        <span className={`d8-type-badge d8-type-${order.type.toLowerCase().replace('_', '-')}`}>
+                          {order.type.replace('_', ' ')}
                         </span>
                       </td>
                       <td>
@@ -270,7 +273,24 @@ const Orders: React.FC = () => {
                         <span className="orders-company">{order.companyName}</span>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{order.quantity}</td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(order.requestedPrice)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {order.type === 'MARKET' ? (
+                           <span className="text-muted">Market</span>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+                            {['LIMIT', 'STOP_LIMIT'].includes(order.type) && (
+                              <span title="Limit Price" style={{ fontSize: '0.85rem' }}>
+                                L: {formatCurrency(order.requestedPrice)}
+                              </span>
+                            )}
+                            {order.triggerPrice && (
+                              <span title="Trigger Price" style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>
+                                T: {formatCurrency(order.triggerPrice)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ textAlign: 'right' }}>
                         {order.executionPrice !== null ? formatCurrency(order.executionPrice) : <span className="text-muted">—</span>}
                       </td>

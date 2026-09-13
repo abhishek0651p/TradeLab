@@ -20,36 +20,49 @@ interface OrderEntryProps {
   cashBalance: number;
   quantityOnHand: number;
   onClose: () => void;
-  onPlaceOrder: (orderType: OrderType, quantity: number, limitPrice?: number) => void;
+  onPlaceOrder: (orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => void;
 }
 
 const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, onClose, onPlaceOrder }) => {
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState<string>('');
   const [limitPrice, setLimitPrice] = useState<string>('');
+  const [triggerPrice, setTriggerPrice] = useState<string>('');
   const [error, setError] = useState<string>('');
 
   const quantityNum = Number(quantity);
   const limitPriceNum = Number(limitPrice);
-  const isQuantityValid = quantity.trim() !== '' && Number.isInteger(quantityNum) && quantityNum > 0;
-  const isLimitPriceValid = orderType === 'MARKET' || (limitPrice.trim() !== '' && limitPriceNum > 0);
+  const triggerPriceNum = Number(triggerPrice);
 
-  const effectivePrice = orderType === 'MARKET' ? price : (isLimitPriceValid ? limitPriceNum : 0);
+  const isQuantityValid = quantity.trim() !== '' && Number.isInteger(quantityNum) && quantityNum > 0;
+  const isLimitPriceValid = !['LIMIT', 'STOP_LIMIT'].includes(orderType) || (limitPrice.trim() !== '' && limitPriceNum > 0);
+  const isTriggerPriceValid = !['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) || (triggerPrice.trim() !== '' && triggerPriceNum > 0);
+
+  const effectivePrice = orderType === 'MARKET' ? price : (['LIMIT', 'STOP_LIMIT'].includes(orderType) ? limitPriceNum : triggerPriceNum);
   const estimatedValue = isQuantityValid ? effectivePrice * quantityNum : 0;
 
-  const canSubmit = isQuantityValid && isLimitPriceValid;
+  const canSubmit = isQuantityValid && isLimitPriceValid && isTriggerPriceValid;
 
   const handleSubmit = () => {
     if (!isQuantityValid) {
       setError('Please enter a positive whole number for quantity.');
       return;
     }
-    if (orderType === 'LIMIT' && !isLimitPriceValid) {
+    if (['LIMIT', 'STOP_LIMIT'].includes(orderType) && !isLimitPriceValid) {
       setError('Please enter a valid limit price greater than zero.');
       return;
     }
+    if (['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) && !isTriggerPriceValid) {
+      setError('Please enter a valid trigger price greater than zero.');
+      return;
+    }
 
-    onPlaceOrder(orderType, quantityNum, orderType === 'LIMIT' ? limitPriceNum : undefined);
+    onPlaceOrder(
+      orderType,
+      quantityNum,
+      ['LIMIT', 'STOP_LIMIT'].includes(orderType) ? limitPriceNum : undefined,
+      ['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) ? triggerPriceNum : undefined
+    );
     onClose();
   };
 
@@ -78,18 +91,13 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
         <div className="modal-body">
           {/* Order Type Toggle */}
           <div className="d8-order-type-toggle">
-            <button
-              className={`d8-order-type-option ${orderType === 'MARKET' ? 'd8-order-type-active' : ''}`}
-              onClick={() => { setOrderType('MARKET'); setError(''); }}
-            >
-              Market
-            </button>
-            <button
-              className={`d8-order-type-option ${orderType === 'LIMIT' ? 'd8-order-type-active' : ''}`}
-              onClick={() => { setOrderType('LIMIT'); setError(''); }}
-            >
-              Limit
-            </button>
+            <button className={`d8-order-type-option ${orderType === 'MARKET' ? 'd8-order-type-active' : ''}`} onClick={() => { setOrderType('MARKET'); setError(''); }}>Market</button>
+            <button className={`d8-order-type-option ${orderType === 'LIMIT' ? 'd8-order-type-active' : ''}`} onClick={() => { setOrderType('LIMIT'); setError(''); }}>Limit</button>
+            <button className={`d8-order-type-option ${orderType === 'STOP_MARKET' ? 'd8-order-type-active' : ''}`} onClick={() => { setOrderType('STOP_MARKET'); setError(''); }}>SL-M</button>
+            <button className={`d8-order-type-option ${orderType === 'STOP_LIMIT' ? 'd8-order-type-active' : ''}`} onClick={() => { setOrderType('STOP_LIMIT'); setError(''); }}>SL-L</button>
+            {side === 'SELL' && (
+              <button className={`d8-order-type-option ${orderType === 'TARGET' ? 'd8-order-type-active' : ''}`} onClick={() => { setOrderType('TARGET'); setError(''); }}>Target</button>
+            )}
           </div>
 
           {/* Quantity Input */}
@@ -109,8 +117,31 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
             {side === 'BUY' && <div className="field-hint">Available cash: {formatCurrShort(cashBalance)}</div>}
           </div>
 
-          {/* Limit Price Input (only for LIMIT orders) */}
-          {orderType === 'LIMIT' && (
+          {/* Trigger Price Input */}
+          {['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) && (
+            <div className="form-field">
+              <label htmlFor="order-trigger-price">Trigger Price (₹)</label>
+              <input
+                id="order-trigger-price"
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="Enter trigger price"
+                value={triggerPrice}
+                onChange={(e) => { setTriggerPrice(e.target.value); setError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+              />
+              <div className="field-hint">
+                {orderType === 'TARGET'
+                  ? 'Take-profit executes when market price rises to this level'
+                  : (side === 'BUY' ? 'Triggers when market price rises above this level' : 'Triggers when market price drops below this level')
+                }
+              </div>
+            </div>
+          )}
+
+          {/* Limit Price Input */}
+          {['LIMIT', 'STOP_LIMIT'].includes(orderType) && (
             <div className="form-field">
               <label htmlFor="order-limit-price">Limit Price (₹)</label>
               <input
@@ -154,10 +185,16 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
                 <span>Quantity</span>
                 <strong>{quantityNum} shares</strong>
               </div>
-              {orderType === 'LIMIT' && (
+              {['LIMIT', 'STOP_LIMIT'].includes(orderType) && (
                 <div className="order-summary-row">
                   <span>Limit Price</span>
                   <strong>{formatCurr(limitPriceNum)}</strong>
+                </div>
+              )}
+              {['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) && (
+                <div className="order-summary-row">
+                  <span>Trigger Price</span>
+                  <strong>{formatCurr(triggerPriceNum)}</strong>
                 </div>
               )}
               <div className="order-summary-row">
@@ -180,7 +217,7 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
             onClick={handleSubmit}
             disabled={!canSubmit}
           >
-            {orderType === 'MARKET' ? 'Confirm ' + sideLabel : 'Place Limit ' + sideLabel}
+            {orderType === 'MARKET' ? 'Confirm ' + sideLabel : 'Place ' + orderType.replace('_', ' ') + ' ' + sideLabel}
           </button>
         </div>
       </div>
@@ -273,7 +310,7 @@ const StockDetail = () => {
     '1Y': 'Past Year',
   };
 
-  const handleOrderSubmit = (side: OrderSide, orderType: OrderType, quantity: number, limitPrice?: number) => {
+  const handleOrderSubmit = (side: OrderSide, orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => {
     const result = placeOrder({
       symbol: symbol!,
       companyName: stock.companyName,
@@ -281,6 +318,7 @@ const StockDetail = () => {
       orderType,
       quantity,
       limitPrice,
+      triggerPrice,
       currentPrice: stock.price
     });
 
@@ -292,10 +330,10 @@ const StockDetail = () => {
           message: 'Order executed successfully. ID: ' + (result.order?.id ?? '') + ' — Execution Price: ' + formatCurrency(result.execution.executionPrice)
         });
       } else {
-        // Limit order — pending
+        // Pending order
         setToast({
           type: 'success',
-          message: 'Limit order placed. ID: ' + (result.order?.id ?? '') + ' — Status: PENDING'
+          message: `${orderType === 'LIMIT' ? 'Limit' : 'Conditional'} order placed. ID: ` + (result.order?.id ?? '') + ' — Status: PENDING'
         });
       }
     } else {
@@ -547,7 +585,7 @@ const StockDetail = () => {
           cashBalance={account.cashBalance}
           quantityOnHand={holding ? holding.quantity : 0}
           onClose={() => setOrderModal(null)}
-          onPlaceOrder={(orderType, qty, lp) => handleOrderSubmit(orderModal.side, orderType, qty, lp)}
+          onPlaceOrder={(orderType, qty, lp, tp) => handleOrderSubmit(orderModal.side, orderType, qty, lp, tp)}
         />
       )}
     </div>
