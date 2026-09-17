@@ -13,7 +13,7 @@ import {
   PlaceOrderParams,
   PlaceOrderResult
 } from '../types';
-import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS } from '../data/mockData';
+import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS, simulateMarketUpdate } from '../data/mockData';
 
 // ──────────────────────────────────────────────
 // Context interface
@@ -28,6 +28,7 @@ interface TradingContextType {
   orders: Order[];
   executions: Execution[];
   stocks: StockData[];
+  tick: number;
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   executeBuy: (symbol: string, quantity: number, currentPrice: number, companyName: string) => { success: boolean; error?: string };
@@ -35,6 +36,7 @@ interface TradingContextType {
   placeOrder: (params: PlaceOrderParams) => PlaceOrderResult;
   cancelOrder: (orderId: string) => { success: boolean; error?: string };
   processPendingOrders: () => { processed: number; executed: number; rejected: number };
+  simulateTick: () => void;
   resetAccount: () => void;
 }
 
@@ -325,7 +327,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [trades, setTrades] = useState<Trade[]>(() => safeLoadJSON('tradelab_trades', []));
   const [orders, setOrders] = useState<Order[]>(() => safeLoadJSON('tradelab_orders', []));
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
-  const [stocks] = useState<StockData[]>(MOCK_STOCKS);
+  const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
+  const [tick, setTick] = useState<number>(() => safeLoadJSON<number>('tradelab_tick', 0));
 
   // Refs for atomic reads of latest state
   const accountRef = useRef(account);
@@ -349,6 +352,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_trades', JSON.stringify(trades)); }, [trades]);
   useEffect(() => { localStorage.setItem('tradelab_orders', JSON.stringify(orders)); }, [orders]);
   useEffect(() => { localStorage.setItem('tradelab_executions', JSON.stringify(executions)); }, [executions]);
+  useEffect(() => { localStorage.setItem('tradelab_stocks', JSON.stringify(stocks)); }, [stocks]);
+  useEffect(() => { localStorage.setItem('tradelab_tick', JSON.stringify(tick)); }, [tick]);
 
   // ── Watchlist ──
 
@@ -762,6 +767,17 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem('tradelab_executions');
   };
 
+  // ── Simulate market update ──
+
+  const tickRef = useRef(tick);
+  useEffect(() => { tickRef.current = tick; }, [tick]);
+
+  const simulateTick = useCallback(() => {
+    const nextTick = tickRef.current + 1;
+    setTick(nextTick);
+    setStocks(currentStocks => simulateMarketUpdate(currentStocks, nextTick));
+  }, []);
+
   return (
     <TradingContext.Provider value={{
       account,
@@ -772,6 +788,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       orders,
       executions,
       stocks,
+      tick,
       addToWatchlist,
       removeFromWatchlist,
       executeBuy,
@@ -779,6 +796,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       placeOrder,
       cancelOrder,
       processPendingOrders,
+      simulateTick,
       resetAccount
     }}>
       {children}

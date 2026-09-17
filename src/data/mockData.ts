@@ -53,9 +53,42 @@ export const MOCK_STOCKS: StockData[] = [
 ];
 
 // Deterministic pseudo-random generator
-const seededRandom = (seed: number) => {
+export const seededRandom = (seed: number) => {
   const x = Math.sin(seed++) * 10000;
   return x - Math.floor(x);
+};
+
+// Deterministic hash for per-symbol seeds
+export const symbolHash = (symbol: string): number => {
+  let hash = 0;
+  for (let i = 0; i < symbol.length; i++) {
+    hash = symbol.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash);
+};
+
+// Simulate a deterministic market tick
+export const simulateMarketUpdate = (stocks: StockData[], tick: number): StockData[] => {
+  const MAX_CHANGE = 0.02;
+
+  return stocks.map(stock => {
+    const rand = seededRandom(symbolHash(stock.symbol) + tick);
+    const changePct = (rand - 0.5) * 2 * MAX_CHANGE;
+    const newPrice = Math.max(1, stock.price * (1 + changePct));
+    const clampedPrice = Number(newPrice.toFixed(2));
+
+    const newChange = Number((clampedPrice - stock.previousClose).toFixed(2));
+    const newChangePercent = Number((((newChange / stock.previousClose) * 100).toFixed(2)));
+
+    return {
+      ...stock,
+      price: clampedPrice,
+      change: newChange,
+      changePercent: newChangePercent,
+      dayHigh: Math.max(stock.dayHigh, clampedPrice),
+      dayLow: Math.min(stock.dayLow, clampedPrice)
+    };
+  });
 };
 
 export const generateChartData = (symbol: string, timeframe: '1D' | '1W' | '1M' | '1Y'): ChartDataPoint[] => {

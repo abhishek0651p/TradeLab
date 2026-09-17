@@ -19,7 +19,7 @@ type OrderFilterStatus = 'ALL' | OrderStatus;
 type SideFilter = 'ALL' | OrderSide;
 
 const Orders: React.FC = () => {
-  const { trades, orders, executions, stocks, cancelOrder, processPendingOrders } = useTrading();
+  const { trades, orders, executions, stocks, cancelOrder, processPendingOrders, simulateTick, tick } = useTrading();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('orders');
   const [orderStatusFilter, setOrderStatusFilter] = useState<OrderFilterStatus>('ALL');
@@ -214,6 +214,12 @@ const Orders: React.FC = () => {
                 Process Pending
               </button>
             )}
+
+            <button className="btn d8-process-btn" onClick={simulateTick} title="Update market prices deterministically (tick {tick})">
+              <Zap size={14} />
+              Simulate Update
+            </button>
+
           </div>
 
           {filteredOrders.length === 0 ? (
