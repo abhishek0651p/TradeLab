@@ -2500,3 +2500,333 @@ tr:hover td {
     font-size: 1.25rem;
   }
 }
+
+/* ==============================================
+   Day 12: Trade History & Performance Analytics
+   ============================================== */
+
+/* ── Page Container ── */
+.trades-page {
+  animation: trades-fade-in 0.4s ease-out;
+}
+
+@keyframes trades-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Hero Header ── */
+.trades-hero {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(59, 130, 246, 0.08) 50%, rgba(16, 185, 129, 0.06) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  border-radius: 16px;
+  padding: 32px;
+  margin-bottom: 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.trades-hero::before {
+  content: '';
+  position: absolute;
+  top: -40%;
+  right: -10%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.trades-hero-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+.trades-hero-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+
+.trades-hero-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.trades-hero-right {
+  display: flex;
+  gap: 24px;
+}
+
+.trades-hero-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.trades-hero-stat-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.trades-hero-stat-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+/* ── Section Titles ── */
+.trades-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 32px;
+  margin-bottom: 16px;
+}
+
+/* ── Summary Grid ── */
+.trades-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.trades-summary-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.trades-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+.trades-summary-icon {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trades-icon-blue {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.trades-icon-green {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.trades-icon-red {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.trades-icon-purple {
+  background-color: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+}
+
+.trades-summary-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.trades-summary-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.trades-summary-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.trades-summary-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ── Performance Statistics Grid ── */
+.trades-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.trades-stat-card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 0.2s ease;
+}
+
+.trades-stat-card:hover {
+  transform: translateY(-2px);
+}
+
+.trades-stat-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.trades-stat-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.trades-stat-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ── Filter Bar ── */
+.trades-filter-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+/* ── Trade Table ── */
+.trades-table-container {
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+
+.trades-table {
+  min-width: 1000px;
+}
+
+.trades-symbol-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+/* ── Notice Footer ── */
+.trades-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 32px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(59, 130, 246, 0.03) 100%);
+  border: 1px dashed rgba(139, 92, 246, 0.25);
+}
+
+.trades-notice p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.trades-notice svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Day 12 Responsive ── */
+@media (max-width: 900px) {
+  .trades-hero-main {
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .trades-hero-right {
+    align-self: stretch;
+    justify-content: flex-start;
+  }
+
+  .trades-hero-stat {
+    align-items: flex-start;
+  }
+
+  .trades-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .trades-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .trades-filter-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .trades-table {
+    min-width: 850px;
+  }
+}
+
+@media (max-width: 600px) {
+  .trades-hero {
+    padding: 24px 20px;
+  }
+
+  .trades-hero-title {
+    font-size: 1.4rem;
+  }
+
+  .trades-hero-right {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .trades-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trades-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trades-section-title {
+    font-size: 1.1rem;
+    margin-top: 28px;
+  }
+
+  .trades-summary-card {
+    padding: 16px;
+  }
+
+  .trades-summary-value {
+    font-size: 1.25rem;
+  }
+}

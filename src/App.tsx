@@ -9,6 +9,7 @@ import Portfolio from './pages/Portfolio';
 import Settings from './pages/Settings';
 import StockDetail from './pages/StockDetail';
 import Orders from './pages/Orders';
+import TradeHistory from './pages/TradeHistory';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
               <Route path="/watchlist" element={<Watchlist />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/orders" element={<Orders />} />
+              <Route path="/trades" element={<TradeHistory />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/stock/:symbol" element={<StockDetail />} />
             </Routes>
