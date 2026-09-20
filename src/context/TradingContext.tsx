@@ -16,6 +16,28 @@ import {
 import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS, simulateMarketUpdate } from '../data/mockData';
 
 // ──────────────────────────────────────────────
+// Settings model
+// ──────────────────────────────────────────────
+
+export interface TradingSettings {
+  autoSimEnabled: boolean;
+  autoSimIntervalSec: number;   // 2–60 seconds
+  showPnlPercent: boolean;      // show % alongside ₹ values
+}
+
+const DEFAULT_SETTINGS: TradingSettings = {
+  autoSimEnabled: false,
+  autoSimIntervalSec: 10,
+  showPnlPercent: true
+};
+
+const AUTO_SIM_MIN_SEC = 2;
+const AUTO_SIM_MAX_SEC = 60;
+
+const clampInterval = (sec: number): number =>
+  Math.max(AUTO_SIM_MIN_SEC, Math.min(AUTO_SIM_MAX_SEC, Math.round(sec)));
+
+// ──────────────────────────────────────────────
 // Context interface
 // ──────────────────────────────────────────────
 
@@ -29,6 +51,8 @@ interface TradingContextType {
   executions: Execution[];
   stocks: StockData[];
   tick: number;
+  settings: TradingSettings;
+  autoSimActive: boolean;
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   executeBuy: (symbol: string, quantity: number, currentPrice: number, companyName: string) => { success: boolean; error?: string };
@@ -38,6 +62,7 @@ interface TradingContextType {
   processPendingOrders: () => { processed: number; executed: number; rejected: number };
   simulateTick: () => void;
   resetAccount: () => void;
+  updateSettings: (patch: Partial<TradingSettings>) => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -329,6 +354,11 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
   const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
   const [tick, setTick] = useState<number>(() => safeLoadJSON<number>('tradelab_tick', 0));
+  const [settings, setSettings] = useState<TradingSettings>(() => {
+    const saved = safeLoadJSON<TradingSettings>('tradelab_settings', DEFAULT_SETTINGS);
+    return { ...DEFAULT_SETTINGS, ...saved, autoSimIntervalSec: clampInterval(saved.autoSimIntervalSec ?? DEFAULT_SETTINGS.autoSimIntervalSec) };
+  });
+  const [autoSimActive, setAutoSimActive] = useState(false);
 
   // Refs for atomic reads of latest state
   const accountRef = useRef(account);
@@ -354,6 +384,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_executions', JSON.stringify(executions)); }, [executions]);
   useEffect(() => { localStorage.setItem('tradelab_stocks', JSON.stringify(stocks)); }, [stocks]);
   useEffect(() => { localStorage.setItem('tradelab_tick', JSON.stringify(tick)); }, [tick]);
+  useEffect(() => { localStorage.setItem('tradelab_settings', JSON.stringify(settings)); }, [settings]);
 
   // ── Watchlist ──
 
@@ -753,9 +784,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: result.success, error: result.error };
   }, [placeOrder]);
 
-  // ── Reset ──
+  // ── Reset (Day 15 fix: fully reset ALL persisted state) ──
 
   const resetAccount = () => {
+    // Reset all React state to initial values
     setAccount(INITIAL_ACCOUNT_STATE);
     setWatchlist([]);
     setPositions([]);
@@ -763,9 +795,33 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setTrades([]);
     setOrders([]);
     setExecutions([]);
+    setStocks(MOCK_STOCKS);
+    setTick(0);
+
+    // Clear ALL persisted keys so a page refresh doesn't restore stale data
+    localStorage.removeItem('tradelab_account');
+    localStorage.removeItem('tradelab_watchlist');
+    localStorage.removeItem('tradelab_positions');
+    localStorage.removeItem('tradelab_holdings');
+    localStorage.removeItem('tradelab_trades');
     localStorage.removeItem('tradelab_orders');
     localStorage.removeItem('tradelab_executions');
+    localStorage.removeItem('tradelab_stocks');
+    localStorage.removeItem('tradelab_tick');
+    // Note: tradelab_settings is intentionally preserved across resets
   };
+
+  // ── Update settings ──
+
+  const updateSettings = useCallback((patch: Partial<TradingSettings>) => {
+    setSettings(prev => {
+      const next = { ...prev, ...patch };
+      if (patch.autoSimIntervalSec !== undefined) {
+        next.autoSimIntervalSec = clampInterval(patch.autoSimIntervalSec);
+      }
+      return next;
+    });
+  }, []);
 
   // ── Simulate market update ──
 
@@ -778,6 +834,31 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setStocks(currentStocks => simulateMarketUpdate(currentStocks, nextTick));
   }, []);
 
+  // ── Auto-simulation interval (Day 15) ──
+
+  const simulateTickRef = useRef(simulateTick);
+  useEffect(() => { simulateTickRef.current = simulateTick; }, [simulateTick]);
+  const processPendingOrdersRef = useRef(processPendingOrders);
+  useEffect(() => { processPendingOrdersRef.current = processPendingOrders; }, [processPendingOrders]);
+
+  useEffect(() => {
+    if (!settings.autoSimEnabled) {
+      setAutoSimActive(false);
+      return;
+    }
+    setAutoSimActive(true);
+    const intervalMs = settings.autoSimIntervalSec * 1000;
+    const id = window.setInterval(() => {
+      simulateTickRef.current();
+      // Process pending orders after each auto-tick
+      processPendingOrdersRef.current();
+    }, intervalMs);
+    return () => {
+      window.clearInterval(id);
+      setAutoSimActive(false);
+    };
+  }, [settings.autoSimEnabled, settings.autoSimIntervalSec]);
+
   return (
     <TradingContext.Provider value={{
       account,
@@ -789,6 +870,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       executions,
       stocks,
       tick,
+      settings,
+      autoSimActive,
       addToWatchlist,
       removeFromWatchlist,
       executeBuy,
@@ -797,7 +880,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cancelOrder,
       processPendingOrders,
       simulateTick,
-      resetAccount
+      resetAccount,
+      updateSettings
     }}>
       {children}
     </TradingContext.Provider>

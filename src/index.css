@@ -3951,3 +3951,440 @@ tr:hover td {
     display: none;
   }
 }
+
+/* ==============================================
+   Day 15: Settings & Simulation Control Center
+   ============================================== */
+
+.d15-settings {
+  max-width: 800px;
+  animation: risk-fade-in 0.3s ease-out;
+}
+
+.d15-subtitle {
+  color: var(--text-muted);
+  font-size: 1rem;
+  margin-top: -12px;
+  margin-bottom: 32px;
+}
+
+/* ── Sections ── */
+.d15-section {
+  margin-bottom: 32px;
+}
+
+.d15-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  color: var(--primary);
+}
+
+.d15-section-header h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.d15-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+/* ── Settings Rows ── */
+.d15-setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.d15-setting-row:first-child {
+  padding-top: 0;
+}
+
+.d15-setting-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.d15-setting-info {
+  flex: 1;
+}
+
+.d15-setting-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.d15-setting-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── Toggles ── */
+.d15-toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.d15-toggle-on {
+  background: var(--primary);
+}
+
+.d15-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.d15-toggle-on .d15-toggle-thumb {
+  transform: translateX(20px);
+}
+
+/* ── Interval Slider ── */
+.d15-interval-row {
+  align-items: center;
+}
+
+.d15-interval-control {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 200px;
+}
+
+.d15-slider {
+  flex: 1;
+  accent-color: var(--primary);
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.d15-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+}
+
+.d15-interval-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+  width: 32px;
+  text-align: right;
+}
+
+/* ── Simulation Status ── */
+.d15-sim-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 16px 0;
+}
+
+.d15-sim-active {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.d15-sim-inactive {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.d15-sim-tick {
+  margin-left: auto;
+  font-family: monospace;
+  font-size: 0.9rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.d15-setting-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 16px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.d15-setting-note svg {
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Data Management ── */
+.d15-export-group,
+.d15-reset-group {
+  padding: 4px 0;
+}
+
+.d15-export-buttons {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.d15-export-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.d15-export-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.d15-export-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.d15-export-count {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+}
+
+.d15-feedback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: #10b981;
+  animation: risk-fade-in 0.3s;
+}
+
+.d15-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  margin: 24px 0;
+}
+
+.d15-danger-label {
+  color: var(--danger);
+}
+
+.d15-reset-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.d15-reset-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.d15-confirm-box {
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 12px;
+  padding: 16px;
+  animation: risk-fade-in 0.3s;
+}
+
+.d15-confirm-warning {
+  display: flex;
+  gap: 12px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
+
+.d15-confirm-warning svg {
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
+.d15-confirm-warning ul {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+}
+
+.d15-confirm-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.d15-confirm-yes {
+  background: var(--danger);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.d15-confirm-yes:hover {
+  background: #dc2626;
+}
+
+.d15-confirm-no {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.d15-confirm-no:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.d15-success-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 8px;
+  color: #10b981;
+  font-size: 0.9rem;
+  font-weight: 600;
+  animation: risk-fade-in 0.3s;
+}
+
+/* ── About ── */
+.d15-about-card {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(99, 102, 241, 0.05) 100%);
+}
+
+.d15-about-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.d15-about-header h3 {
+  margin: 0 0 2px 0;
+  font-size: 1.1rem;
+}
+
+.d15-about-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: rgba(59, 130, 246, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.d15-about-card p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.d15-about-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.d15-about-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .d15-setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .d15-interval-control {
+    width: 100%;
+  }
+
+  .d15-export-buttons {
+    flex-direction: column;
+  }
+
+  .d15-confirm-actions {
+    flex-direction: column;
+  }
+}
