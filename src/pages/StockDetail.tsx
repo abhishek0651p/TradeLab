@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import { generateChartData } from '../data/mockData';
-import { Star, ArrowLeft, Plus, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X } from 'lucide-react';
+import { Star, ArrowLeft, Plus, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X, AlertTriangle } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { ChartDataPoint, OrderSide, OrderType } from '../types';
+import { ChartDataPoint, Holding, OrderSide, OrderType, StockData } from '../types';
+import { computePreOrderRiskSnapshot, PreOrderRiskSnapshot } from '../risk/RiskCalculationModel';
 
 type Timeframe = '1D' | '1W' | '1M' | '1Y';
 
@@ -19,11 +20,13 @@ interface OrderEntryProps {
   side: OrderSide;
   cashBalance: number;
   quantityOnHand: number;
+  holdings: Holding[];
+  stocks: StockData[];
   onClose: () => void;
   onPlaceOrder: (orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => void;
 }
 
-const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, onClose, onPlaceOrder }) => {
+const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, holdings, stocks, onClose, onPlaceOrder }) => {
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState<string>('');
   const [limitPrice, setLimitPrice] = useState<string>('');
@@ -42,6 +45,22 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
   const estimatedValue = isQuantityValid ? effectivePrice * quantityNum : 0;
 
   const canSubmit = isQuantityValid && isLimitPriceValid && isTriggerPriceValid;
+
+  /* ── Pre-order risk snapshot ── */
+  const preOrderRisk: PreOrderRiskSnapshot | null = useMemo(() => {
+    if (!isQuantityValid) return null;
+    return computePreOrderRiskSnapshot({
+      symbol,
+      side,
+      quantity: quantityNum,
+      currentPrice: effectivePrice,
+      cashBalance,
+      holdings,
+      stocks
+    });
+  }, [symbol, side, quantityNum, effectivePrice, cashBalance, holdings, stocks, isQuantityValid]);
+
+  const hasRiskWarnings = preOrderRisk && preOrderRisk.warnings.length > 0;
 
   const handleSubmit = () => {
     if (!isQuantityValid) {
@@ -205,6 +224,35 @@ const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, sid
                 <span>Estimated Value</span>
                 <strong style={{ color: sideColor }}>{formatCurrShort(estimatedValue)}</strong>
               </div>
+
+              {/* ── Pre-order Risk Preview ── */}
+              {preOrderRisk && (
+                <>
+                  <div className="order-summary-row">
+                    <span>Current Allocation</span>
+                    <strong>{preOrderRisk.currentAllocationPercent.toFixed(1)}%</strong>
+                  </div>
+                  <div className="order-summary-row">
+                    <span>Estimated Allocation</span>
+                    <strong>{preOrderRisk.estimatedAllocationPercent.toFixed(1)}%</strong>
+                  </div>
+                  <div className="order-summary-row">
+                    <span>Est. Cash Utilization</span>
+                    <strong>{preOrderRisk.estimatedCashUtilization.toFixed(1)}%</strong>
+                  </div>
+
+                  {hasRiskWarnings && (
+                    <div className="sd-risk-warnings-preview">
+                      {preOrderRisk.warnings.map((w, i) => (
+                        <div key={i} className="sd-risk-warning-item">
+                          <AlertTriangle size={14} />
+                          <span>{w}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -584,6 +632,8 @@ const StockDetail = () => {
           side={orderModal.side}
           cashBalance={account.cashBalance}
           quantityOnHand={holding ? holding.quantity : 0}
+          holdings={holdings}
+          stocks={stocks}
           onClose={() => setOrderModal(null)}
           onPlaceOrder={(orderType, qty, lp, tp) => handleOrderSubmit(orderModal.side, orderType, qty, lp, tp)}
         />
