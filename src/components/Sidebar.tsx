@@ -1,14 +1,36 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LineChart, Star, Briefcase, Settings, Clock, Activity, Brain, History, Shield } from 'lucide-react';
+import { LayoutDashboard, LineChart, Star, Briefcase, Settings, Clock, Activity, Brain, History, Shield, Bell } from 'lucide-react';
+import { useTrading } from '../context/TradingContext';
+import NotificationCenter from './NotificationCenter';
 
 const Sidebar = () => {
+  const { unreadNotificationCount } = useTrading();
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const badgeText = unreadNotificationCount > 99 ? '99+' : String(unreadNotificationCount);
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <h1><Activity color="#3b82f6" /> TradeLab</h1>
+        <div className="d16-header-row">
+          <h1><Activity color="#3b82f6" /> TradeLab</h1>
+          <button
+            className="d16-bell-btn"
+            onClick={() => setNotifOpen(prev => !prev)}
+            aria-label={`Notifications${unreadNotificationCount > 0 ? ` (${unreadNotificationCount} unread)` : ''}`}
+          >
+            <Bell size={20} />
+            {unreadNotificationCount > 0 && (
+              <span className="d16-bell-badge">{badgeText}</span>
+            )}
+          </button>
+        </div>
         <span className="sidebar-tag">VIRTUAL ACCOUNT</span>
       </div>
+
+      {/* Activity Center panel */}
+      <NotificationCenter isOpen={notifOpen} onClose={() => setNotifOpen(false)} />
       
       <div className="nav-links">
         <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>

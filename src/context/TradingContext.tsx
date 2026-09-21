@@ -11,7 +11,10 @@ import {
   Order,
   Execution,
   PlaceOrderParams,
-  PlaceOrderResult
+  PlaceOrderResult,
+  Notification,
+  NotificationType,
+  NotificationPriority
 } from '../types';
 import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS, simulateMarketUpdate } from '../data/mockData';
 
@@ -23,12 +26,14 @@ export interface TradingSettings {
   autoSimEnabled: boolean;
   autoSimIntervalSec: number;   // 2–60 seconds
   showPnlPercent: boolean;      // show % alongside ₹ values
+  notificationsEnabled: boolean; // Day 16: toggle non-critical notifications
 }
 
 const DEFAULT_SETTINGS: TradingSettings = {
   autoSimEnabled: false,
   autoSimIntervalSec: 10,
-  showPnlPercent: true
+  showPnlPercent: true,
+  notificationsEnabled: true
 };
 
 const AUTO_SIM_MIN_SEC = 2;
@@ -53,6 +58,8 @@ interface TradingContextType {
   tick: number;
   settings: TradingSettings;
   autoSimActive: boolean;
+  notifications: Notification[];
+  unreadNotificationCount: number;
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   executeBuy: (symbol: string, quantity: number, currentPrice: number, companyName: string) => { success: boolean; error?: string };
@@ -63,6 +70,9 @@ interface TradingContextType {
   simulateTick: () => void;
   resetAccount: () => void;
   updateSettings: (patch: Partial<TradingSettings>) => void;
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
+  clearNotifications: () => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -79,6 +89,9 @@ const generateExecutionId = (): string =>
 
 const generateTradeId = (): string =>
   'TRD-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+const generateNotificationId = (): string =>
+  'NOT-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
 
 // ──────────────────────────────────────────────
 // Pure helper functions for state computation
@@ -360,12 +373,20 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
   const [autoSimActive, setAutoSimActive] = useState(false);
 
+  // ── Notification state (Day 16) ──
+  const [notifications, setNotifications] = useState<Notification[]>(() =>
+    safeLoadJSON<Notification[]>('tradelab_notifications', [])
+  );
+  const [marketAlertState, setMarketAlertState] = useState<Record<string, boolean>>({});
+
   // Refs for atomic reads of latest state
   const accountRef = useRef(account);
   const holdingsRef = useRef(holdings);
   const positionsRef = useRef(positions);
   const stocksRef = useRef(stocks);
   const ordersRef = useRef(orders);
+  const notificationsRef = useRef(notifications);
+  const marketAlertStateRef = useRef(marketAlertState);
   const isProcessingRef = useRef(false);
 
   useEffect(() => { accountRef.current = account; }, [account]);
@@ -373,6 +394,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { positionsRef.current = positions; }, [positions]);
   useEffect(() => { stocksRef.current = stocks; }, [stocks]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
+  useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
+  useEffect(() => { marketAlertStateRef.current = marketAlertState; }, [marketAlertState]);
 
   // Persist to localStorage
   useEffect(() => { localStorage.setItem('tradelab_account', JSON.stringify(account)); }, [account]);
@@ -385,6 +408,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_stocks', JSON.stringify(stocks)); }, [stocks]);
   useEffect(() => { localStorage.setItem('tradelab_tick', JSON.stringify(tick)); }, [tick]);
   useEffect(() => { localStorage.setItem('tradelab_settings', JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { localStorage.setItem('tradelab_notifications', JSON.stringify(notifications)); }, [notifications]);
 
   // ── Watchlist ──
 
@@ -397,6 +421,53 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const removeFromWatchlist = (symbol: string) => {
     setWatchlist(watchlist.filter(s => s !== symbol));
   };
+
+  // ── Notification helpers (Day 16) ──
+
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+
+  const addNotification = useCallback((
+    type: NotificationType,
+    priority: NotificationPriority,
+    title: string,
+    message: string,
+    metadata?: { symbol?: string; orderId?: string; tradeId?: string; route?: string }
+  ) => {
+    // Suppress MARKET_EVENT when notifications are disabled
+    if (type === 'MARKET_EVENT' && !settingsRef.current.notificationsEnabled) {
+      return;
+    }
+
+    const notification: Notification = {
+      id: generateNotificationId(),
+      type,
+      priority,
+      title,
+      message,
+      timestamp: Date.now(),
+      read: false,
+      ...metadata
+    };
+
+    setNotifications(prev => {
+      // Newest first, capped at 100
+      const next = [notification, ...prev].slice(0, 100);
+      return next;
+    });
+  }, []);
+
+  const markNotificationRead = useCallback((id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  }, []);
+
+  const markAllNotificationsRead = useCallback(() => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  }, []);
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
+  }, []);
 
   // ── Internal order execution (shared by market orders and pending-order processing) ──
 
@@ -502,6 +573,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         rejectionReason: validation.error ?? 'Order validation failed.'
       };
       setOrders(prev => [rejectedOrder, ...prev]);
+      addNotification(
+        'ORDER_REJECTED',
+        'ERROR',
+        'Order Rejected',
+        `${params.side} ${params.quantity} ${params.symbol} — ${validation.error ?? 'Order validation failed.'}`,
+        { symbol: params.symbol, orderId: rejectedOrder.id, route: '/orders' }
+      );
       return { success: false, error: validation.error, order: rejectedOrder };
     }
 
@@ -549,6 +627,14 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setPositions(result.newPositions);
       setAccount(result.newAccount);
 
+      addNotification(
+        'ORDER_EXECUTED',
+        'SUCCESS',
+        'Order Executed',
+        `${order.side} ${order.quantity} ${order.symbol} at ${formatINR(executionPrice)}`,
+        { symbol: order.symbol, orderId: order.id, tradeId: result.trade.id, route: '/orders' }
+      );
+
       return { success: true, order: executedOrder, execution: result.execution };
     }
 
@@ -576,6 +662,14 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setHoldings(result.newHoldings);
         setPositions(result.newPositions);
         setAccount(result.newAccount);
+
+        addNotification(
+          'ORDER_EXECUTED',
+          'SUCCESS',
+          'Order Executed',
+          `${order.side} ${order.quantity} ${order.symbol} at ${formatINR(executionPrice)}`,
+          { symbol: order.symbol, orderId: order.id, tradeId: result.trade.id, route: '/orders' }
+        );
 
         return { success: true, order: executedOrder, execution: result.execution };
       }
@@ -612,6 +706,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     setOrders(prev => prev.map(o => o.id === orderId ? cancelledOrder : o));
+    addNotification(
+      'ORDER_CANCELLED',
+      'INFO',
+      'Order Cancelled',
+      `${order.side} ${order.quantity} ${order.symbol}`,
+      { symbol: order.symbol, orderId: order.id, route: '/orders' }
+    );
     return { success: true };
   }, []);
 
@@ -686,6 +787,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (idx >= 0) {
           updatedOrders[idx] = { ...currentState, status: 'TRIGGERED' };
         }
+        addNotification(
+          'ORDER_TRIGGERED',
+          'WARNING',
+          'Order Triggered',
+          `${currentState.side} ${currentState.quantity} ${currentState.symbol} @ ${formatINR(currentState.triggerPrice ?? currentState.requestedPrice)}`,
+          { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
+        );
         processedIds.add(order.id);
         continue;
       }
@@ -708,6 +816,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             rejectionReason: revalidation.reason ?? 'Order validation failed at execution.'
           };
         }
+        addNotification(
+          'ORDER_REJECTED',
+          'ERROR',
+          'Order Rejected',
+          `${currentState.side} ${currentState.quantity} ${currentState.symbol} — ${revalidation.reason ?? 'Order validation failed.'}`,
+          { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
+        );
         processedIds.add(order.id);
         rejected++;
         continue;
@@ -740,6 +855,14 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setHoldings(result.newHoldings);
       setPositions(result.newPositions);
       setAccount(result.newAccount);
+
+      addNotification(
+        'ORDER_EXECUTED',
+        'SUCCESS',
+        'Order Executed',
+        `${currentState.side} ${currentState.quantity} ${currentState.symbol} at ${formatINR(currentPrice)}`,
+        { symbol: currentState.symbol, orderId: currentState.id, tradeId: result.trade.id, route: '/orders' }
+      );
 
       processedIds.add(order.id);
       executed++;
@@ -786,7 +909,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // ── Reset (Day 15 fix: fully reset ALL persisted state) ──
 
-  const resetAccount = () => {
+  const resetAccount = useCallback(() => {
     // Reset all React state to initial values
     setAccount(INITIAL_ACCOUNT_STATE);
     setWatchlist([]);
@@ -798,6 +921,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setStocks(MOCK_STOCKS);
     setTick(0);
 
+    // Clear notifications first, then add reset notification
+    setNotifications([]);
+
     // Clear ALL persisted keys so a page refresh doesn't restore stale data
     localStorage.removeItem('tradelab_account');
     localStorage.removeItem('tradelab_watchlist');
@@ -808,8 +934,23 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem('tradelab_executions');
     localStorage.removeItem('tradelab_stocks');
     localStorage.removeItem('tradelab_tick');
+    localStorage.removeItem('tradelab_notifications');
     // Note: tradelab_settings is intentionally preserved across resets
-  };
+
+    // Add reset notification AFTER clearing — this survives because
+    // React batches the setNotifications([]) and this addNotification
+    // but addNotification uses functional updater, so it appends to []
+    addNotification(
+      'ACCOUNT_EVENT',
+      'INFO',
+      'Account Reset',
+      'Your paper trading account has been reset to its initial state.',
+      { route: '/settings' }
+    );
+
+    // Reset market alert state
+    setMarketAlertState({});
+  }, [addNotification]);
 
   // ── Update settings ──
 
@@ -831,8 +972,30 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const simulateTick = useCallback(() => {
     const nextTick = tickRef.current + 1;
     setTick(nextTick);
-    setStocks(currentStocks => simulateMarketUpdate(currentStocks, nextTick));
-  }, []);
+    setStocks(currentStocks => {
+      const updated = simulateMarketUpdate(currentStocks, nextTick);
+
+      // Market alert: notify when a stock crosses the ±5% threshold
+      updated.forEach(stock => {
+        const nowAbove = Math.abs(stock.changePercent) >= 5;
+        const wasAbove = marketAlertStateRef.current[stock.symbol] ?? false;
+        if (nowAbove && !wasAbove) {
+          const direction = stock.changePercent >= 0 ? 'up' : 'down';
+          addNotification(
+            'MARKET_EVENT',
+            'WARNING',
+            'Market Alert',
+            `${stock.symbol} is ${direction} ${Math.abs(stock.changePercent).toFixed(1)}% today.`,
+            { symbol: stock.symbol, route: `/stock/${stock.symbol}` }
+          );
+        }
+        // Update threshold state for this stock
+        setMarketAlertState(prev => ({ ...prev, [stock.symbol]: nowAbove }));
+      });
+
+      return updated;
+    });
+  }, [addNotification]);
 
   // ── Auto-simulation interval (Day 15) ──
 
@@ -859,6 +1022,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, [settings.autoSimEnabled, settings.autoSimIntervalSec]);
 
+  const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
   return (
     <TradingContext.Provider value={{
       account,
@@ -872,6 +1037,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       tick,
       settings,
       autoSimActive,
+      notifications,
+      unreadNotificationCount,
       addToWatchlist,
       removeFromWatchlist,
       executeBuy,
@@ -881,7 +1048,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       processPendingOrders,
       simulateTick,
       resetAccount,
-      updateSettings
+      updateSettings,
+      markNotificationRead,
+      markAllNotificationsRead,
+      clearNotifications
     }}>
       {children}
     </TradingContext.Provider>

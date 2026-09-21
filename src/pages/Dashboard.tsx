@@ -7,19 +7,26 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   BarChart3,
+  Bell,
+  BellOff,
   Briefcase,
+  CheckCircle,
   Clock,
   DollarSign,
   Layers,
   LineChart,
+  RotateCcw,
   Shield,
   Star,
   TrendingDown,
   TrendingUp,
   Wallet,
+  XCircle,
   Zap,
   AlertTriangle,
-  Target
+  Target,
+  Info,
+  ChevronRight
 } from 'lucide-react';
 import {
   computeCashUtilization,
@@ -49,7 +56,7 @@ const formatPercent = (value: number) => {
 /* ── Dashboard Component ── */
 
 const Dashboard = () => {
-  const { account, holdings, stocks, orders, trades } = useTrading();
+  const { account, holdings, stocks, orders, trades, notifications } = useTrading();
   const navigate = useNavigate();
 
   /* ── Derived data ── */
@@ -100,6 +107,33 @@ const Dashboard = () => {
   const hasHoldings = holdings.length > 0;
   const hasTrades = trades.length > 0;
   const hasPending = pendingOrders.length > 0;
+
+  /* Recent activity: latest 5 notifications for dashboard */
+  const recentNotifications = useMemo(() => notifications.slice(0, 5), [notifications]);
+
+  const formatRelativeTime = (timestamp: number): string => {
+    const now = Date.now();
+    const diffSec = Math.floor((now - timestamp) / 1000);
+    if (diffSec < 10) return 'Just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return `${Math.floor(diffHr / 24)}d ago`;
+  };
+
+  const getNotifIcon = (type: string) => {
+    switch (type) {
+      case 'ORDER_EXECUTED': return <CheckCircle size={15} className="d16-icon d16-icon-success" />;
+      case 'ORDER_REJECTED': return <XCircle size={15} className="d16-icon d16-icon-error" />;
+      case 'ORDER_CANCELLED': return <XCircle size={15} className="d16-icon d16-icon-muted" />;
+      case 'ORDER_TRIGGERED': return <Zap size={15} className="d16-icon d16-icon-warning" />;
+      case 'MARKET_EVENT': return <TrendingUp size={15} className="d16-icon d16-icon-warning" />;
+      case 'ACCOUNT_EVENT': return <RotateCcw size={15} className="d16-icon d16-icon-info" />;
+      default: return <Info size={15} className="d16-icon d16-icon-info" />;
+    }
+  };
 
   return (
     <div className="d14-dashboard">
@@ -455,6 +489,49 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════
+          Section 7: Recent Activity (Day 16)
+          ═══════════════════════════════════════════════ */}
+      <div className="d14-card d16-activity-card">
+        <div className="d14-card-header">
+          <div className="d14-card-title">
+            <Bell size={18} /> Recent Activity
+          </div>
+        </div>
+
+        {recentNotifications.length > 0 ? (
+          <div className="d16-activity-list">
+            {recentNotifications.map(n => (
+              <div
+                key={n.id}
+                className={`d16-activity-row ${!n.read ? 'd16-activity-unread' : ''} ${n.route ? 'd16-activity-clickable' : ''}`}
+                onClick={() => {
+                  if (n.route) navigate(n.route);
+                }}
+                role={n.route ? 'button' : undefined}
+                tabIndex={n.route ? 0 : undefined}
+              >
+                <div className="d16-activity-icon">{getNotifIcon(n.type)}</div>
+                <div className="d16-activity-content">
+                  <div className="d16-activity-title">{n.title}</div>
+                  <div className="d16-activity-message">{n.message}</div>
+                </div>
+                <div className="d16-activity-time">
+                  {formatRelativeTime(n.timestamp)}
+                  {n.route && <ChevronRight size={12} />}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="d14-empty-state">
+            <BellOff size={32} strokeWidth={1.5} />
+            <p>No recent activity</p>
+            <span className="d14-empty-sub">Order executions, alerts, and events will appear here</span>
+          </div>
+        )}
       </div>
 
       {/* ─── Paper Trading Notice ─── */}

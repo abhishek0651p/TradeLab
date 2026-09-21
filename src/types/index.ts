@@ -2,6 +2,31 @@ export type OrderSide = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'STOP_LIMIT' | 'TARGET';
 export type OrderStatus = 'PENDING' | 'TRIGGERED' | 'EXECUTED' | 'CANCELLED' | 'REJECTED';
 
+export type NotificationType =
+  | 'ORDER_EXECUTED'
+  | 'ORDER_REJECTED'
+  | 'ORDER_CANCELLED'
+  | 'ORDER_TRIGGERED'
+  | 'MARKET_EVENT'
+  | 'ACCOUNT_EVENT'
+  | 'SYSTEM';
+
+export type NotificationPriority = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  priority: NotificationPriority;
+  title: string;
+  message: string;
+  symbol?: string;
+  orderId?: string;
+  tradeId?: string;
+  timestamp: number;
+  read: boolean;
+  route?: string;
+}
+
 export interface Holding {
   symbol: string;
   quantity: number;

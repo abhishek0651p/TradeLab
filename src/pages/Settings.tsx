@@ -15,7 +15,8 @@ import {
   CheckCircle,
   FileText,
   Trash2,
-  BarChart3
+  BarChart3,
+  Bell
 } from 'lucide-react';
 
 /* ── CSV helpers ── */
@@ -74,6 +75,10 @@ const Settings = () => {
 
   const handleTogglePnlPercent = () => {
     updateSettings({ showPnlPercent: !settings.showPnlPercent });
+  };
+
+  const handleToggleNotifications = () => {
+    updateSettings({ notificationsEnabled: !settings.notificationsEnabled });
   };
 
   /* ── CSV export handlers ── */
@@ -245,6 +250,35 @@ const Settings = () => {
               className={`d15-toggle ${settings.showPnlPercent ? 'd15-toggle-on' : ''}`}
               onClick={handleTogglePnlPercent}
               aria-label="Toggle P&L percentages"
+            >
+              <span className="d15-toggle-thumb" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════
+          Section 2.5: Notifications (Day 16)
+          ═══════════════════════════════════════════════ */}
+      <div className="d15-section">
+        <div className="d15-section-header">
+          <Bell size={20} />
+          <h2>Notifications</h2>
+        </div>
+
+        <div className="d15-card">
+          <div className="d15-setting-row">
+            <div className="d15-setting-info">
+              <div className="d15-setting-label">Enable Notifications</div>
+              <p className="d15-setting-desc">
+                Receive alerts for order activity, account events, and significant market moves.
+                Disabling suppresses market alerts but order and account notifications remain active.
+              </p>
+            </div>
+            <button
+              className={`d15-toggle ${settings.notificationsEnabled ? 'd15-toggle-on' : ''}`}
+              onClick={handleToggleNotifications}
+              aria-label="Toggle notifications"
             >
               <span className="d15-toggle-thumb" />
             </button>
