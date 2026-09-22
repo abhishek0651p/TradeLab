@@ -4834,3 +4834,583 @@ tr:hover td {
     font-size: 0.72rem;
   }
 }
+
+/* ==============================================
+   Day 17: Advanced Order Execution Center
+   ============================================== */
+
+/* ── Analytics Header ── */
+.d17-analytics-header {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.d17-analytics-card {
+  padding: 12px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.d17-analytics-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.d17-analytics-value {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.d17-analytics-sub {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ── Filter Toolbar ── */
+.d17-filter-toolbar {
+  margin-bottom: 12px;
+}
+
+.d17-filter-row-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.d17-search-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 320px;
+}
+
+.d17-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+}
+
+.d17-search-input {
+  width: 100%;
+  padding: 8px 36px 8px 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  transition: border-color 0.15s ease;
+  box-sizing: border-box;
+}
+
+.d17-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.d17-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.d17-search-clear:hover {
+  color: var(--text-main);
+}
+
+.d17-result-count {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.d17-clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.d17-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+}
+
+.d17-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.d17-filter-pill-groups {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.d17-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.d17-pill-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-right: 4px;
+}
+
+.d17-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.d17-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+}
+
+.d17-pill-active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── Actions Bar ── */
+.d17-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+/* ── Simulation Status ── */
+.d17-sim-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.d17-sim-tick {
+  font-weight: 700;
+  color: var(--primary);
+  font-family: monospace;
+}
+
+/* ── Expanded Row ── */
+.d17-row-expanded {
+  background: rgba(59, 130, 246, 0.03) !important;
+}
+
+.d17-expand-row > td {
+  padding: 0 !important;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Order Details ── */
+.d17-order-details {
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 0 0 8px 8px;
+}
+
+.d17-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px 24px;
+  margin-bottom: 16px;
+}
+
+.d17-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.d17-detail-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.d17-detail-value {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.d17-mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+}
+
+.d17-side-badge {
+  font-weight: 700;
+}
+
+.d17-side-buy {
+  color: var(--success);
+}
+
+.d17-side-sell {
+  color: var(--danger);
+}
+
+.d17-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.d17-status-pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.d17-status-triggered {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary);
+}
+
+.d17-status-executed {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.d17-status-cancelled {
+  background: rgba(107, 114, 128, 0.15);
+  color: #6b7280;
+}
+
+.d17-status-rejected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.text-danger {
+  color: #ef4444 !important;
+}
+
+/* ── Lifecycle Timeline ── */
+.d17-lifecycle {
+  margin-bottom: 12px;
+}
+
+.d17-lifecycle-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 10px;
+}
+
+.d17-lifecycle-timeline {
+  position: relative;
+  padding-left: 20px;
+  border-left: 2px solid var(--border);
+}
+
+.d17-lifecycle-node {
+  position: relative;
+  padding-bottom: 12px;
+}
+
+.d17-lifecycle-dot {
+  position: absolute;
+  left: -24px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  background: var(--card-bg);
+}
+
+.d17-lifecycle-created {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.d17-lifecycle-triggered {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.d17-lifecycle-executed {
+  border-color: #10b981;
+  background: #10b981;
+}
+
+.d17-lifecycle-cancelled {
+  border-color: #6b7280;
+  background: #6b7280;
+}
+
+.d17-lifecycle-rejected {
+  border-color: #ef4444;
+  background: #ef4444;
+}
+
+.d17-lifecycle-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.d17-lifecycle-event {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.d17-lifecycle-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* ── Actions ── */
+.d17-actions {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.d17-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.d17-action-cancel {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.d17-action-cancel:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* ── Mobile Cards ── */
+.d17-mobile-cards {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.d17-order-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.d17-order-card:hover {
+  border-color: var(--primary);
+}
+
+.d17-card-expanded {
+  border-color: var(--primary);
+}
+
+.d17-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.d17-card-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.d17-card-body {
+  padding: 10px 14px;
+}
+
+.d17-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.d17-card-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.d17-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.d17-expand-icon {
+  display: flex;
+  align-items: center;
+}
+
+.d17-card-expand {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .d17-analytics-header {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .d17-filter-row-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .d17-search-wrap {
+    max-width: 100%;
+  }
+
+  .d17-actions-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .d17-sim-status {
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  .d17-detail-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Switch to mobile cards below 900px */
+  .d17-desktop-table {
+    display: none;
+  }
+
+  .d17-mobile-cards {
+    display: flex;
+  }
+
+  .d17-pill-groups {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .d17-analytics-header {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .d17-analytics-card {
+    padding: 8px 10px;
+  }
+
+  .d17-analytics-value {
+    font-size: 1rem;
+  }
+
+  .d17-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .d17-filter-pill-groups {
+    flex-wrap: wrap;
+  }
+
+  .d17-order-card {
+    border-radius: 8px;
+  }
+}
