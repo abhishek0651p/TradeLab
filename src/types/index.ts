@@ -127,8 +127,3 @@ export interface ChartDataPoint {
   volume: number;
 }
 
-export interface PortfolioPosition {
-  symbol: string;
-  quantity: number;
-  averagePrice: number;
-}

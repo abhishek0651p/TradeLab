@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useTrading } from '../context/TradingContext';
+import { useTrading, enrichHoldings, aggregatePortfolio } from '../context/TradingContext';
 import {
   Activity,
   ArrowRight,
@@ -143,72 +143,26 @@ const Portfolio = () => {
 
   const hasHoldings = holdings.length > 0;
 
-  /* ── Derived portfolio rows ── */
+  /* ── Derived portfolio rows via centralized helper ── */
 
   const portfolioRows = useMemo(() => {
-    return holdings.map(holding => {
-      const stock = stocks.find(s => s.symbol === holding.symbol);
-      const currentPrice = stock ? stock.price : holding.averageBuyPrice;
-      const investedValue = holding.averageBuyPrice * holding.quantity;
-      const currentValue = currentPrice * holding.quantity;
-      const unrealizedPnL = currentValue - investedValue;
-      const unrealizedPnLPercent = investedValue > 0 ? (unrealizedPnL / investedValue) * 100 : 0;
-
-      return {
-        symbol: holding.symbol,
-        companyName: stock ? stock.companyName : holding.symbol,
-        quantity: holding.quantity,
-        averageBuyPrice: holding.averageBuyPrice,
-        currentPrice,
-        investedValue,
-        currentValue,
-        unrealizedPnL,
-        unrealizedPnLPercent,
-        sector: stock ? stock.sector : 'Unknown'
-      };
-    });
+    return enrichHoldings(holdings, stocks);
   }, [holdings, stocks]);
 
-  /* ── Portfolio totals ── */
+  /* ── Portfolio totals via centralized helper ── */
 
   const {
-    totalCostBasis,
+    totalInvestedValue,
     totalCurrentValue,
     totalUnrealizedPnL,
     realizedPnL,
     combinedPnL,
-    portfolioValue,
+    totalAccountValue,
     totalReturnPercent,
     dayPnL
   } = useMemo(() => {
-    let costBasis = 0;
-    let currentValue = 0;
-    portfolioRows.forEach(row => {
-      costBasis += row.averageBuyPrice * row.quantity;
-      currentValue += row.currentValue;
-    });
-    const unrealizedPnL = currentValue - costBasis;
-    const realized = trades.reduce((sum, t) => sum + (t.realizedPnL ?? 0), 0);
-    const portValue = account.cashBalance + currentValue;
-    const returnPct = account.startingBalance > 0
-      ? ((portValue - account.startingBalance) / account.startingBalance) * 100
-      : 0;
-    const dayPnL = holdings.reduce((sum, h) => {
-      const stock = stocks.find(s => s.symbol === h.symbol);
-      return sum + (stock ? stock.change * h.quantity : 0);
-    }, 0);
-
-    return {
-      totalCostBasis: costBasis,
-      totalCurrentValue: currentValue,
-      totalUnrealizedPnL: unrealizedPnL,
-      realizedPnL: realized,
-      combinedPnL: realized + unrealizedPnL,
-      portfolioValue: portValue,
-      totalReturnPercent: returnPct,
-      dayPnL
-    };
-  }, [portfolioRows, trades, account, holdings, stocks]);
+    return aggregatePortfolio(holdings, stocks, account, trades);
+  }, [holdings, stocks, account, trades]);
 
   /* ── Holdings with allocation ── */
 
@@ -358,7 +312,7 @@ const Portfolio = () => {
         <div className="portfolio-hero-main">
           <div className="portfolio-hero-left">
             <h1 className="portfolio-hero-title">Portfolio</h1>
-            <div className="portfolio-hero-value">{formatCurrency(portfolioValue)}</div>
+            <div className="portfolio-hero-value">{formatCurrency(totalAccountValue)}</div>
             <div className="portfolio-hero-meta">
               <span className={`portfolio-hero-change ${totalReturnPercent >= 0 ? 'text-success' : 'text-danger'}`}>
                 {totalReturnPercent >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
@@ -399,7 +353,7 @@ const Portfolio = () => {
           </div>
           <div className="portfolio-metric-info">
             <div className="card-title">Total Portfolio Value</div>
-            <div className="card-value">{formatCurrency(portfolioValue)}</div>
+            <div className="card-value">{formatCurrency(totalAccountValue)}</div>
             <div className="card-subtitle text-muted">Cash + market value</div>
           </div>
         </div>
@@ -410,7 +364,7 @@ const Portfolio = () => {
           </div>
           <div className="portfolio-metric-info">
             <div className="card-title">Invested (Cost Basis)</div>
-            <div className="card-value">{formatCurrency(totalCostBasis)}</div>
+            <div className="card-value">{formatCurrency(totalInvestedValue)}</div>
             <div className="card-subtitle text-muted">Total cost basis</div>
           </div>
         </div>

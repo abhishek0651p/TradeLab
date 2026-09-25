@@ -4,7 +4,6 @@ import {
   OrderSide,
   OrderType,
   OrderStatus,
-  PortfolioPosition,
   Holding,
   Trade,
   StockData,
@@ -49,7 +48,6 @@ const clampInterval = (sec: number): number =>
 interface TradingContextType {
   account: AccountState;
   watchlist: string[];
-  positions: PortfolioPosition[];
   holdings: Holding[];
   trades: Trade[];
   orders: Order[];
@@ -191,6 +189,102 @@ const computeAccountMetrics = (
 }
 
 // ──────────────────────────────────────────────
+// Portfolio aggregation helpers (centralized)
+// ──────────────────────────────────────────────
+
+export interface EnrichedHolding extends Holding {
+  companyName: string;
+  currentPrice: number;
+  investedValue: number;
+  currentValue: number;
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  sector: string;
+}
+
+export interface PortfolioSummary {
+  totalInvestedValue: number;
+  totalCurrentValue: number;
+  totalUnrealizedPnL: number;
+  totalUnrealizedPnLPercent: number;
+  cashBalance: number;
+  totalAccountValue: number;
+  dayPnL: number;
+  realizedPnL: number;
+  combinedPnL: number;
+  totalReturnPercent: number;
+}
+
+/** Compute enriched holdings (current price, invested value, P&L, etc.) */
+export const enrichHoldings = (
+  holdings: Holding[],
+  stocks: StockData[]
+): EnrichedHolding[] => {
+  return holdings.map(holding => {
+    const stock = stocks.find(s => s.symbol === holding.symbol);
+    const currentPrice = stock ? stock.price : holding.averageBuyPrice;
+    const investedValue = holding.averageBuyPrice * holding.quantity;
+    const currentValue = currentPrice * holding.quantity;
+    const unrealizedPnL = currentValue - investedValue;
+    const unrealizedPnLPercent = investedValue > 0 ? (unrealizedPnL / investedValue) * 100 : 0;
+
+    return {
+      ...holding,
+      companyName: stock ? stock.companyName : holding.symbol,
+      currentPrice,
+      investedValue: Number(investedValue.toFixed(2)),
+      currentValue: Number(currentValue.toFixed(2)),
+      unrealizedPnL: Number(unrealizedPnL.toFixed(2)),
+      unrealizedPnLPercent: Number(unrealizedPnLPercent.toFixed(2)),
+      sector: stock ? stock.sector : 'Unknown'
+    };
+  });
+};
+
+/** Aggregate portfolio-level metrics from holdings + account state */
+export const aggregatePortfolio = (
+  holdings: Holding[],
+  stocks: StockData[],
+  account: AccountState,
+  trades: Trade[]
+): PortfolioSummary => {
+  const enriched = enrichHoldings(holdings, stocks);
+
+  let totalCostBasis = 0;
+  let totalCurrentValue = 0;
+  enriched.forEach(h => {
+    totalCostBasis += h.investedValue;
+    totalCurrentValue += h.currentValue;
+  });
+
+  const unrealizedPnL = totalCurrentValue - totalCostBasis;
+  const realizedPnL = trades.reduce((sum, t) => sum + (t.realizedPnL ?? 0), 0);
+  const totalAccountValue = account.cashBalance + totalCurrentValue;
+  const totalReturnPercent = account.startingBalance > 0
+    ? ((totalAccountValue - account.startingBalance) / account.startingBalance) * 100
+    : 0;
+
+  // Day P&L: today's price change × holdings quantity
+  const dayPnL = holdings.reduce((sum, h) => {
+    const stock = stocks.find(s => s.symbol === h.symbol);
+    return sum + (stock ? stock.change * h.quantity : 0);
+  }, 0);
+
+  return {
+    totalInvestedValue: totalCostBasis,
+    totalCurrentValue,
+    totalUnrealizedPnL: unrealizedPnL,
+    totalUnrealizedPnLPercent: totalCostBasis > 0 ? (unrealizedPnL / totalCostBasis) * 100 : 0,
+    cashBalance: account.cashBalance,
+    totalAccountValue,
+    dayPnL: Number(dayPnL.toFixed(2)),
+    realizedPnL,
+    combinedPnL: realizedPnL + unrealizedPnL,
+    totalReturnPercent: Number(totalReturnPercent.toFixed(2))
+  };
+};
+
+// ──────────────────────────────────────────────
 // Original helpers (unchanged)
 // ──────────────────────────────────────────────
 
@@ -215,23 +309,9 @@ const computeSellHoldings = (prevHoldings: Holding[], symbol: string, quantity: 
   return prevHoldings.map(h => h.symbol === symbol ? { ...h, quantity: newQty } : h);
 };
 
-const computeBuyPositions = (prevPositions: PortfolioPosition[], symbol: string, quantity: number, price: number): PortfolioPosition[] => {
-  const existing = prevPositions.find(p => p.symbol === symbol);
-  if (existing) {
-    const newQty = existing.quantity + quantity;
-    const newAvg = ((existing.averagePrice * existing.quantity) + (price * quantity)) / newQty;
-    return prevPositions.map(p => p.symbol === symbol ? { ...p, quantity: newQty, averagePrice: Number(newAvg.toFixed(2)) } : p);
-  }
-  return [...prevPositions, { symbol, quantity, averagePrice: Number(price.toFixed(2)) }];
-};
-
-const computeSellPositions = (prevPositions: PortfolioPosition[], symbol: string, quantity: number): PortfolioPosition[] => {
-  const existing = prevPositions.find(p => p.symbol === symbol);
-  if (!existing) return prevPositions;
-  const newQty = existing.quantity - quantity;
-  if (newQty <= 0) return prevPositions.filter(p => p.symbol !== symbol);
-  return prevPositions.map(p => p.symbol === symbol ? { ...p, quantity: newQty } : p);
-};
+// ──────────────────────────────────────────────
+// Validation
+// ──────────────────────────────────────────────
 
 
 
@@ -360,7 +440,6 @@ function safeLoadJSON<T>(key: string, fallback: T): T {
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [account, setAccount] = useState<AccountState>(() => safeLoadJSON('tradelab_account', INITIAL_ACCOUNT_STATE));
   const [watchlist, setWatchlist] = useState<string[]>(() => safeLoadJSON('tradelab_watchlist', []));
-  const [positions, setPositions] = useState<PortfolioPosition[]>(() => safeLoadJSON('tradelab_positions', []));
   const [holdings, setHoldings] = useState<Holding[]>(() => safeLoadJSON('tradelab_holdings', []));
   const [trades, setTrades] = useState<Trade[]>(() => safeLoadJSON('tradelab_trades', []));
   const [orders, setOrders] = useState<Order[]>(() => safeLoadJSON('tradelab_orders', []));
@@ -382,7 +461,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Refs for atomic reads of latest state
   const accountRef = useRef(account);
   const holdingsRef = useRef(holdings);
-  const positionsRef = useRef(positions);
   const stocksRef = useRef(stocks);
   const ordersRef = useRef(orders);
   const notificationsRef = useRef(notifications);
@@ -391,7 +469,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => { accountRef.current = account; }, [account]);
   useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
-  useEffect(() => { positionsRef.current = positions; }, [positions]);
   useEffect(() => { stocksRef.current = stocks; }, [stocks]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
@@ -400,7 +477,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Persist to localStorage
   useEffect(() => { localStorage.setItem('tradelab_account', JSON.stringify(account)); }, [account]);
   useEffect(() => { localStorage.setItem('tradelab_watchlist', JSON.stringify(watchlist)); }, [watchlist]);
-  useEffect(() => { localStorage.setItem('tradelab_positions', JSON.stringify(positions)); }, [positions]);
   useEffect(() => { localStorage.setItem('tradelab_holdings', JSON.stringify(holdings)); }, [holdings]);
   useEffect(() => { localStorage.setItem('tradelab_trades', JSON.stringify(trades)); }, [trades]);
   useEffect(() => { localStorage.setItem('tradelab_orders', JSON.stringify(orders)); }, [orders]);
@@ -474,10 +550,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const executeOrderInternal = useCallback((
     order: Order,
     executionPrice: number
-  ): { execution: Execution; trade: Trade; newAccount: AccountState; newHoldings: Holding[]; newPositions: PortfolioPosition[] } => {
+  ): { execution: Execution; trade: Trade; newAccount: AccountState; newHoldings: Holding[] } => {
     const now = new Date().toISOString();
     const prevHoldings = holdingsRef.current;
-    const prevPositions = positionsRef.current;
     const currentAccount = accountRef.current;
 
     // Create execution
@@ -494,13 +569,11 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     let newHoldings: Holding[];
-    let newPositions: PortfolioPosition[];
     let newCash: number;
     let realizedGain = 0;
 
     if (order.side === 'BUY') {
       newHoldings = computeBuyHoldings(prevHoldings, order.symbol, order.quantity, executionPrice);
-      newPositions = computeBuyPositions(prevPositions, order.symbol, order.quantity, executionPrice);
       newCash = currentAccount.cashBalance - execution.totalValue;
     } else {
       // SELL
@@ -509,7 +582,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       realizedGain = execution.totalValue - costBasis;
 
       newHoldings = computeSellHoldings(prevHoldings, order.symbol, order.quantity);
-      newPositions = computeSellPositions(prevPositions, order.symbol, order.quantity);
       newCash = currentAccount.cashBalance + execution.totalValue;
     }
 
@@ -542,7 +614,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       orderType: order.type
     };
 
-    return { execution, trade, newAccount, newHoldings, newPositions };
+    return { execution, trade, newAccount, newHoldings };
   }, []);
 
   // ── placeOrder — central order creation ──
@@ -624,7 +696,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setExecutions(prev => [result.execution, ...prev]);
       setTrades(prev => [result.trade, ...prev]);
       setHoldings(result.newHoldings);
-      setPositions(result.newPositions);
       setAccount(result.newAccount);
 
       addNotification(
@@ -660,7 +731,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setExecutions(prev => [result.execution, ...prev]);
         setTrades(prev => [result.trade, ...prev]);
         setHoldings(result.newHoldings);
-        setPositions(result.newPositions);
         setAccount(result.newAccount);
 
         addNotification(
@@ -831,10 +901,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // 4. Execute
       const result = executeOrderInternal(currentState, currentPrice);
 
-      // Update account/holdings/positions refs for subsequent orders
+      // Update account/holdings refs for subsequent orders
       accountRef.current = result.newAccount;
       holdingsRef.current = result.newHoldings;
-      positionsRef.current = result.newPositions;
 
       // Mark order executed in our local array
       const idx = updatedOrders.findIndex(o => o.id === order.id);
@@ -853,7 +922,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // Apply state immediately so next order in loop sees updated state
       setHoldings(result.newHoldings);
-      setPositions(result.newPositions);
       setAccount(result.newAccount);
 
       addNotification(
@@ -913,7 +981,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Reset all React state to initial values
     setAccount(INITIAL_ACCOUNT_STATE);
     setWatchlist([]);
-    setPositions([]);
     setHoldings([]);
     setTrades([]);
     setOrders([]);
@@ -927,7 +994,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Clear ALL persisted keys so a page refresh doesn't restore stale data
     localStorage.removeItem('tradelab_account');
     localStorage.removeItem('tradelab_watchlist');
-    localStorage.removeItem('tradelab_positions');
     localStorage.removeItem('tradelab_holdings');
     localStorage.removeItem('tradelab_trades');
     localStorage.removeItem('tradelab_orders');
@@ -1028,7 +1094,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <TradingContext.Provider value={{
       account,
       watchlist,
-      positions,
       holdings,
       trades,
       orders,
