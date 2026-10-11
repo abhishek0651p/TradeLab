@@ -5414,3 +5414,621 @@ tr:hover td {
     border-radius: 8px;
   }
 }
+
+/* ==============================================
+   Day 18: Stock Analysis Terminal
+   ============================================== */
+
+/* ── Header Enhancements ──────────────────────── */
+
+.sd-header-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.sd-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.d18-compare-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ── Unsupported Timeframe ────────────────────── */
+
+.sd-tf-unsupported {
+  opacity: 0.35;
+  cursor: not-allowed !important;
+}
+
+.sd-tf-unsupported:hover {
+  background: transparent !important;
+  color: var(--text-muted) !important;
+}
+
+/* ── Main Two-Column Grid ─────────────────────── */
+
+.d18-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.d18-chart-col {
+  min-width: 0;
+}
+
+.d18-analysis-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── No Data / Empty States ───────────────────── */
+
+.d18-no-data-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 10px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.d18-no-data-notice svg {
+  color: #f59e0b;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.d18-no-data-notice strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.d18-no-data-notice p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.d18-empty-state {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ── RSI Sub-chart Panel ──────────────────────── */
+
+.d18-rsi-panel {
+  margin-top: 16px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.d18-rsi-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  padding-left: 4px;
+}
+
+.d18-rsi-zones {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.d18-rsi-zone {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.3px;
+}
+
+.d18-rsi-oversold {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+
+.d18-rsi-neutral {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
+}
+
+.d18-rsi-overbought {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+}
+
+/* ── Technical Indicator Panel ────────────────── */
+
+.d18-indicator-panel {
+  padding: 20px;
+}
+
+.d18-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.d18-toggle-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.d18-toggle-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
+.d18-toggle-active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.d18-indicator-values {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.d18-indicator-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.d18-indicator-row:last-child {
+  border-bottom: none;
+}
+
+.d18-indicator-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.d18-indicator-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* ── Technical Condition Panel ────────────────── */
+
+.d18-condition-panel {
+  padding: 20px;
+}
+
+.d18-condition-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.d18-condition-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+/* ── Condition Badges ─────────────────────────── */
+
+.d18-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.d18-badge-success {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+
+.d18-badge-danger {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+}
+
+.d18-badge-warning {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+.d18-badge-neutral {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
+}
+
+/* ── Shared Position / Planning Labels ────────── */
+
+.d18-pos-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.d18-pos-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.d18-pos-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.d18-pos-row:last-child {
+  border-bottom: none;
+}
+
+/* ── Support & Resistance Panel ───────────────── */
+
+.d18-sr-panel {
+  padding: 20px;
+}
+
+.d18-sr-header-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.d18-sr-header-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.d18-nearest-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.d18-nearest-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.d18-nearest-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.d18-support {
+  color: var(--success);
+}
+
+.d18-resistance {
+  color: var(--danger);
+}
+
+.d18-level-list {
+  margin-top: 12px;
+}
+
+.d18-level-list-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.d18-level-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.d18-level-item span:last-child {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.d18-sr-disclaimer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.d18-sr-disclaimer svg {
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+/* ── Position Intelligence Panel ──────────────── */
+
+.d18-position-card {
+  padding: 20px;
+}
+
+.d18-position-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.d18-no-position {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px 0 4px;
+}
+
+.d18-no-position-sub {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+  text-align: center;
+  padding-bottom: 4px;
+}
+
+/* ── Trade Planning Panel ─────────────────────── */
+
+.d18-planning-panel {
+  padding: 20px;
+}
+
+.d18-planning-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.d18-planning-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.d18-planning-row:last-child {
+  border-bottom: none;
+}
+
+.d18-planning-note {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-style: italic;
+  text-align: center;
+}
+
+/* ── Stock Comparison Overlay ─────────────────── */
+
+.d18-comparison-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.d18-comparison-panel {
+  width: 90%;
+  max-width: 800px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.d18-comparison-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.d18-comparison-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.d18-comparison-close:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.d18-comparison-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.d18-comparison-selector-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.d18-comparison-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.d18-comparison-chip:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
+.d18-chip-active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.d18-comparison-table-wrap {
+  overflow-x: auto;
+}
+
+.d18-comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.d18-comparison-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid var(--border);
+}
+
+.d18-comparison-table td {
+  padding: 10px 12px;
+  color: var(--text-main);
+  font-weight: 500;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.d18-comparison-table tr:last-child td {
+  border-bottom: none;
+}
+
+.d18-comp-symbol {
+  font-weight: 700 !important;
+  color: var(--primary) !important;
+}
+
+/* ── Day 18 Responsive ────────────────────────── */
+
+@media (max-width: 1100px) {
+  .d18-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .d18-analysis-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .d18-analysis-col {
+    grid-template-columns: 1fr;
+  }
+
+  .sd-header-right {
+    flex-direction: row;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .d18-comparison-panel {
+    width: 95%;
+    padding: 16px;
+  }
+
+  .d18-comparison-table {
+    font-size: 0.78rem;
+  }
+
+  .d18-comparison-table th,
+  .d18-comparison-table td {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .d18-toggle-row {
+    gap: 6px;
+  }
+
+  .d18-toggle-btn {
+    padding: 5px 10px;
+    font-size: 0.75rem;
+  }
+
+  .d18-rsi-zones {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
