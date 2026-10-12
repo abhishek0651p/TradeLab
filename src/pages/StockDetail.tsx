@@ -34,7 +34,7 @@ interface OrderEntryProps {
   onPlaceOrder: (orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => void;
 }
 
-const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, holdings, stocks, onClose, onPlaceOrder }) => {
+export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, holdings, stocks, onClose, onPlaceOrder }) => {
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState<string>('');
   const [limitPrice, setLimitPrice] = useState<string>('');

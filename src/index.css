@@ -6032,3 +6032,506 @@ tr:hover td {
     gap: 8px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════
+   Day 19 — Watchlist Intelligence Center
+   All classes prefixed with d18-wl-
+   ═══════════════════════════════════════════════════════ */
+
+/* ── Summary Dashboard Grid ── */
+.d18-wl-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.d18-wl-summary-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.d18-wl-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.d18-wl-summary-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.d18-wl-summary-icon-blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.d18-wl-summary-icon-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.d18-wl-summary-icon-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.d18-wl-summary-icon-info {
+  background: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+}
+
+.d18-wl-summary-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.d18-wl-summary-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* ── Controls Bar ── */
+.d18-wl-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+  align-items: flex-start;
+}
+
+.d18-wl-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.d18-wl-controls-bar .search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.d18-wl-controls-bar .search-input {
+  padding-left: 40px;
+  min-width: 220px;
+}
+
+.d18-wl-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.d18-wl-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.d18-wl-sector-select {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.d18-wl-sector-select:focus {
+  border-color: var(--primary);
+}
+
+.d18-wl-controls-end {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+/* ── View Mode Toggle ── */
+.d18-wl-view-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-main);
+  transition: border-color 0.2s ease, background 0.2s ease;
+  white-space: nowrap;
+}
+
+.d18-wl-view-toggle-btn:hover {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+/* ── Sort Icons ── */
+.d18-wl-sort-icon-idle {
+  opacity: 0.3;
+  transition: opacity 0.15s ease;
+}
+
+.d18-wl-sort-icon-active {
+  opacity: 1;
+  color: var(--primary);
+}
+
+.d18-wl-sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.d18-wl-sortable-th:hover .d18-wl-sort-icon-idle {
+  opacity: 0.6;
+}
+
+/* ── Table View ── */
+.d18-wl-table-wrap {
+  overflow-x: auto;
+}
+
+.d18-wl-table-sector-header,
+.d18-wl-table-sparkline-header,
+.d18-wl-table-actions-header {
+  white-space: nowrap;
+}
+
+.d18-wl-table-sector {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.d18-wl-table-sparkline {
+  width: 120px;
+  min-width: 100px;
+  padding: 4px 8px !important;
+}
+
+.d18-wl-table-actions {
+  white-space: nowrap;
+}
+
+.d18-wl-table-actions-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+/* ── Action Buttons (shared between table and grid) ── */
+.d18-wl-action-btn {
+  padding: 4px 10px !important;
+  font-size: 0.75rem !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  transition: background 0.15s ease, color 0.15s ease !important;
+}
+
+.d18-wl-action-buy {
+  border-color: var(--success) !important;
+  color: var(--success) !important;
+}
+
+.d18-wl-action-buy:hover {
+  background: var(--success) !important;
+  color: #fff !important;
+}
+
+.d18-wl-action-sell {
+  border-color: var(--danger) !important;
+  color: var(--danger) !important;
+}
+
+.d18-wl-action-sell:hover {
+  background: var(--danger) !important;
+  color: #fff !important;
+}
+
+.d18-wl-action-remove {
+  border-color: var(--text-muted) !important;
+  color: var(--text-muted) !important;
+}
+
+.d18-wl-action-remove:hover {
+  border-color: var(--danger) !important;
+  color: var(--danger) !important;
+}
+
+/* ── Grid View ── */
+.d18-wl-grid-container {
+  margin-top: 8px;
+}
+
+.d18-wl-grid-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.d18-wl-grid-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.d18-wl-grid-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  border-color: var(--primary);
+}
+
+.d18-wl-grid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.d18-wl-grid-company {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-main);
+  line-height: 1.3;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.d18-wl-grid-symbol {
+  font-size: 0.8rem;
+  color: var(--primary);
+  font-weight: 600;
+  padding: 2px 8px;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 6px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.d18-wl-grid-price-section {
+  margin-bottom: 12px;
+}
+
+.d18-wl-grid-price {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.d18-wl-grid-change {
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.d18-wl-positive {
+  color: var(--success);
+}
+
+.d18-wl-negative {
+  color: var(--danger);
+}
+
+.d18-wl-grid-sparkline {
+  height: 40px;
+  margin-bottom: 10px;
+}
+
+.d18-wl-grid-sector {
+  margin-bottom: 12px;
+}
+
+.d18-wl-grid-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.d18-wl-grid-actions-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Sector Distribution Donut ── */
+.d18-wl-sector-donut {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.d18-wl-sector-label {
+  text-align: center;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d18-wl-sector-donut-empty {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-left: 16px;
+  white-space: nowrap;
+}
+
+/* ── No Results State ── */
+.d18-wl-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.d18-wl-no-results h3 {
+  margin-top: 12px;
+  color: var(--text-main);
+  font-size: 1.1rem;
+}
+
+.d18-wl-no-results p {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  max-width: 400px;
+}
+
+/* ── Responsive: Tablet ── */
+@media (max-width: 900px) {
+  .d18-wl-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .d18-wl-controls {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .d18-wl-controls-end {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .d18-wl-grid-row {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+  }
+
+  .d18-wl-table-sparkline {
+    width: 90px;
+    min-width: 80px;
+  }
+}
+
+/* ── Responsive: Mobile ── */
+@media (max-width: 600px) {
+  .d18-wl-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .d18-wl-summary-card {
+    padding: 14px 10px;
+  }
+
+  .d18-wl-summary-value {
+    font-size: 1rem;
+  }
+
+  .d18-wl-controls-bar .search-input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .d18-wl-controls-bar {
+    width: 100%;
+  }
+
+  .d18-wl-filter-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .d18-wl-controls-end {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .d18-wl-view-toggle-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .d18-wl-sector-donut {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .d18-wl-grid-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .d18-wl-table-sector-header,
+  .d18-wl-table-sector {
+    display: none;
+  }
+
+  .d18-wl-table-sparkline-header,
+  .d18-wl-table-sparkline {
+    display: none;
+  }
+
+  .d18-wl-action-btn {
+    padding: 3px 7px !important;
+    font-size: 0.7rem !important;
+  }
+
+  .d18-wl-no-results {
+    padding: 32px 16px;
+  }
+}
