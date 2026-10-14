@@ -116,7 +116,9 @@ const Orders: React.FC = () => {
       filtered = filtered.filter(o =>
         o.symbol.toLowerCase().includes(q) ||
         o.id.toLowerCase().includes(q) ||
-        o.companyName.toLowerCase().includes(q)
+        o.companyName.toLowerCase().includes(q) ||
+        (o.isGTT && (q === 'gtt' || (o.expiry && q === 'gtd') || (!o.expiry && q === 'gtc'))) ||
+        (o.trailingConfig && q === 'trailing')
       );
     }
     return [...filtered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -334,9 +336,27 @@ const Orders: React.FC = () => {
                               </span>
                             </td>
                             <td>
-                              <span className={`d8-type-badge d8-type-${order.type.toLowerCase().replace('_', '-')}`}>
-                                {order.type.replace('_', ' ')}
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                <span className={`d8-type-badge d8-type-${order.type.toLowerCase().replace('_', '-')}`}>
+                                  {order.type.replace('_', ' ')}
+                                </span>
+                                {order.isGTT && (
+                                  <span
+                                    className="d20-gtt-badge"
+                                    title={order.expiry ? `Good-Till-Date: Expires ${formatDate(order.expiry)}` : 'Good-Till-Cancelled (No expiry)'}
+                                  >
+                                    GTT{order.expiry ? '·GTD' : '·GTC'}
+                                  </span>
+                                )}
+                                {order.trailingConfig && (
+                                  <span
+                                    className="d20-gtt-trailing-badge"
+                                    title={`Trailing stop: ${order.trailingConfig.distance}${order.trailingConfig.distanceType === 'percent' ? '%' : ' pts'}`}
+                                  >
+                                    Trail
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td>
                               <span className="orders-symbol">{order.symbol}</span>
@@ -443,6 +463,16 @@ const Orders: React.FC = () => {
                           <span className={`d8-type-badge d8-type-${order.type.toLowerCase().replace('_', '-')}`}>
                             {order.type.replace('_', ' ')}
                           </span>
+                          {order.isGTT && (
+                            <span className="d20-gtt-badge">
+                              GTT{order.expiry ? '·GTD' : '·GTC'}
+                            </span>
+                          )}
+                          {order.trailingConfig && (
+                            <span className="d20-gtt-trailing-badge">
+                              Trail
+                            </span>
+                          )}
                         </div>
                         <div className="d17-card-details">
                           <div>Qty: <strong>{order.quantity}</strong></div>

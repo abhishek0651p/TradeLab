@@ -5,7 +5,7 @@ import { generateChartData } from '../data/mockData';
 import { calculateEMA, calculateRSI, calculateVolumeStats, calculateSupportResistance, computeTechnicalCondition } from '../analysis/TechnicalIndicators';
 import { Star, ArrowLeft, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X, AlertTriangle, GitCompare } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Line, Bar } from 'recharts';
-import { ChartDataPoint, Holding, OrderSide, OrderType, StockData } from '../types';
+import { ChartDataPoint, Holding, OrderSide, OrderType, StockData, TrailingStopConfig } from '../types';
 import { computePreOrderRiskSnapshot, PreOrderRiskSnapshot } from '../risk/RiskCalculationModel';
 import TechnicalIndicatorPanel from '../components/TechnicalIndicatorPanel';
 import SupportResistancePanel from '../components/SupportResistancePanel';
@@ -31,7 +31,17 @@ interface OrderEntryProps {
   holdings: Holding[];
   stocks: StockData[];
   onClose: () => void;
-  onPlaceOrder: (orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => void;
+  onPlaceOrder: (
+    orderType: OrderType,
+    quantity: number,
+    limitPrice?: number,
+    triggerPrice?: number,
+    gttOptions?: {
+      isGTT: boolean;
+      expiry: string | null;
+      trailingConfig?: TrailingStopConfig | null;
+    }
+  ) => void;
 }
 
 export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, holdings, stocks, onClose, onPlaceOrder }) => {
@@ -41,18 +51,35 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
   const [triggerPrice, setTriggerPrice] = useState<string>('');
   const [error, setError] = useState<string>('');
 
+  // Day 20: GTT / conditional order state
+  const [isGTT, setIsGTT] = useState<boolean>(false);
+  const [expiryMode, setExpiryMode] = useState<'GTC' | 'GTD'>('GTC'); // Good-Till-Cancelled or Good-Till-Date
+  const [expiryDate, setExpiryDate] = useState<string>(''); // YYYY-MM-DD
+  const [trailingEnabled, setTrailingEnabled] = useState<boolean>(false);
+  const [trailingDistance, setTrailingDistance] = useState<string>(''); // absolute or percent
+  const [trailingDistanceType, setTrailingDistanceType] = useState<'absolute' | 'percent'>('percent');
+
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const quantityNum = Number(quantity);
   const limitPriceNum = Number(limitPrice);
   const triggerPriceNum = Number(triggerPrice);
+  const trailingDistanceNum = Number(trailingDistance);
 
   const isQuantityValid = quantity.trim() !== '' && Number.isInteger(quantityNum) && quantityNum > 0;
   const isLimitPriceValid = !['LIMIT', 'STOP_LIMIT'].includes(orderType) || (limitPrice.trim() !== '' && limitPriceNum > 0);
-  const isTriggerPriceValid = !['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) || (triggerPrice.trim() !== '' && triggerPriceNum > 0);
+  const isTriggerPriceValid = !['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) || (trailingEnabled && isGTT) || (triggerPrice.trim() !== '' && triggerPriceNum > 0);
+  const isExpiryValid = !isGTT || expiryMode === 'GTC' || (expiryDate.trim() !== '' && expiryDate >= todayStr);
+  const isTrailingDistanceValid = !trailingEnabled || !isGTT || (
+    trailingDistance.trim() !== '' &&
+    !isNaN(trailingDistanceNum) &&
+    trailingDistanceNum > 0 &&
+    (trailingDistanceType === 'percent' ? trailingDistanceNum < 100 : trailingDistanceNum < price)
+  );
 
-  const effectivePrice = orderType === 'MARKET' ? price : (['LIMIT', 'STOP_LIMIT'].includes(orderType) ? limitPriceNum : triggerPriceNum);
+  const effectivePrice = orderType === 'MARKET' ? price : (['LIMIT', 'STOP_LIMIT'].includes(orderType) ? limitPriceNum : (triggerPriceNum > 0 ? triggerPriceNum : price));
   const estimatedValue = isQuantityValid ? effectivePrice * quantityNum : 0;
 
-  const canSubmit = isQuantityValid && isLimitPriceValid && isTriggerPriceValid;
+  const canSubmit = isQuantityValid && isLimitPriceValid && isTriggerPriceValid && isExpiryValid && isTrailingDistanceValid;
 
   /* ── Pre-order risk snapshot ── */
   const preOrderRisk: PreOrderRiskSnapshot | null = useMemo(() => {
@@ -83,12 +110,40 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
       setError('Please enter a valid trigger price greater than zero.');
       return;
     }
+    if (isGTT && expiryMode === 'GTD' && !isExpiryValid) {
+      setError('Please select a valid future expiry date.');
+      return;
+    }
+    if (isGTT && trailingEnabled && !isTrailingDistanceValid) {
+      setError(
+        trailingDistanceType === 'percent'
+          ? 'Trailing distance percentage must be between 0.1% and 99.9%.'
+          : 'Trailing distance must be greater than zero and less than current price.'
+      );
+      return;
+    }
+
+    let expiryIso: string | null = null;
+    if (isGTT && expiryMode === 'GTD' && expiryDate) {
+      const [year, month, day] = expiryDate.split('-').map(Number);
+      expiryIso = new Date(year, month - 1, day, 23, 59, 59, 999).toISOString();
+    }
+
+    const trailingConfig = (isGTT && trailingEnabled && trailingDistanceNum > 0) ? {
+      distance: trailingDistanceNum,
+      distanceType: trailingDistanceType
+    } : null;
 
     onPlaceOrder(
       orderType,
       quantityNum,
       ['LIMIT', 'STOP_LIMIT'].includes(orderType) ? limitPriceNum : undefined,
-      ['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) ? triggerPriceNum : undefined
+      ['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) ? (triggerPriceNum > 0 ? triggerPriceNum : undefined) : undefined,
+      {
+        isGTT,
+        expiry: expiryIso,
+        trailingConfig: trailingConfig ?? undefined
+      }
     );
     onClose();
   };
@@ -190,6 +245,157 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
             </div>
           )}
 
+          {/* Day 20: GTT (Good-Till-Triggered) Order Section */}
+          {orderType !== 'MARKET' && (
+            <div className="d20-gtt-container">
+              <div className="d20-gtt-header">
+                <label className="d20-gtt-toggle-label" htmlFor="order-gtt-toggle">
+                  <input
+                    id="order-gtt-toggle"
+                    type="checkbox"
+                    className="d20-gtt-checkbox"
+                    checked={isGTT}
+                    onChange={(e) => {
+                      setIsGTT(e.target.checked);
+                      setError('');
+                    }}
+                  />
+                  <div className="d20-gtt-title-group">
+                    <span className="d20-gtt-title">Good-Till-Triggered (GTT)</span>
+                    <span className="d20-gtt-pill">GTT</span>
+                  </div>
+                </label>
+                <p className="d20-gtt-desc">
+                  Keep order active across sessions until triggered, cancelled, or expired.
+                </p>
+              </div>
+
+              {isGTT && (
+                <div className="d20-gtt-body">
+                  {/* Validity / Expiry Mode */}
+                  <div className="form-field">
+                    <label>Order Validity</label>
+                    <div className="d20-gtt-mode-group">
+                      <button
+                        type="button"
+                        className={`d20-gtt-mode-btn ${expiryMode === 'GTC' ? 'd20-gtt-mode-active' : ''}`}
+                        onClick={() => { setExpiryMode('GTC'); setError(''); }}
+                      >
+                        GTC (Good-Till-Cancelled)
+                      </button>
+                      <button
+                        type="button"
+                        className={`d20-gtt-mode-btn ${expiryMode === 'GTD' ? 'd20-gtt-mode-active' : ''}`}
+                        onClick={() => { setExpiryMode('GTD'); setError(''); }}
+                      >
+                        GTD (Good-Till-Date)
+                      </button>
+                    </div>
+                    <div className="field-hint">
+                      {expiryMode === 'GTC'
+                        ? 'Good-Till-Cancelled: persists indefinitely until filled or you cancel it.'
+                        : 'Good-Till-Date: order automatically expires at the end of the specified date.'}
+                    </div>
+                  </div>
+
+                  {/* Expiry Date input if GTD */}
+                  {expiryMode === 'GTD' && (
+                    <div className="form-field">
+                      <label htmlFor="order-expiry-date">Expiry Date (Local Time)</label>
+                      <input
+                        id="order-expiry-date"
+                        type="date"
+                        min={todayStr}
+                        value={expiryDate}
+                        onChange={(e) => { setExpiryDate(e.target.value); setError(''); }}
+                      />
+                      <div className="field-hint">
+                        {expiryDate
+                          ? `Expires at 23:59:59 on ${new Date(expiryDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                          : 'Select an expiry date in the future.'}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Trailing Stop Loss — only for protective SELL on STOP_MARKET / STOP_LIMIT */}
+                  {side === 'SELL' && ['STOP_MARKET', 'STOP_LIMIT'].includes(orderType) && (
+                    <div className="d20-gtt-trailing-section">
+                      <label className="d20-gtt-toggle-label" htmlFor="order-trailing-toggle">
+                        <input
+                          id="order-trailing-toggle"
+                          type="checkbox"
+                          className="d20-gtt-checkbox"
+                          checked={trailingEnabled}
+                          onChange={(e) => {
+                            setTrailingEnabled(e.target.checked);
+                            setError('');
+                          }}
+                        />
+                        <div className="d20-gtt-title-group">
+                          <span className="d20-gtt-title">Trailing Stop-Loss</span>
+                          <span className="d20-gtt-pill d20-gtt-pill-trailing">Dynamic</span>
+                        </div>
+                      </label>
+                      <p className="d20-gtt-desc">
+                        Protects profit by raising stop price as market climbs (never drops when price falls).
+                      </p>
+
+                      {trailingEnabled && (
+                        <div className="d20-gtt-trailing-inputs">
+                          <div className="d20-gtt-trailing-row">
+                            <div className="d20-gtt-dist-type">
+                              <button
+                                type="button"
+                                className={`d20-gtt-unit-btn ${trailingDistanceType === 'percent' ? 'd20-gtt-unit-active' : ''}`}
+                                onClick={() => setTrailingDistanceType('percent')}
+                              >
+                                %
+                              </button>
+                              <button
+                                type="button"
+                                className={`d20-gtt-unit-btn ${trailingDistanceType === 'absolute' ? 'd20-gtt-unit-active' : ''}`}
+                                onClick={() => setTrailingDistanceType('absolute')}
+                              >
+                                ₹
+                              </button>
+                            </div>
+                            <input
+                              type="number"
+                              min="0.1"
+                              step={trailingDistanceType === 'percent' ? '0.1' : '1'}
+                              placeholder={trailingDistanceType === 'percent' ? 'e.g. 5%' : 'e.g. ₹50'}
+                              value={trailingDistance}
+                              onChange={(e) => { setTrailingDistance(e.target.value); setError(''); }}
+                              className="d20-gtt-dist-input"
+                            />
+                          </div>
+
+                          <div className="field-hint">
+                            {trailingDistanceNum > 0 ? (
+                              <span>
+                                Initial trigger starts at{' '}
+                                <strong>
+                                  {formatCurr(
+                                    trailingDistanceType === 'percent'
+                                      ? price * (1 - trailingDistanceNum / 100)
+                                      : price - trailingDistanceNum
+                                  )}
+                                </strong>
+                                . Follows higher price upward; stays locked if price drops.
+                              </span>
+                            ) : (
+                              'Enter a trailing distance behind peak price.'
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {error && <div className="form-error">{error}</div>}
 
           {/* Order Preview */}
@@ -221,7 +427,7 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
               {['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(orderType) && (
                 <div className="order-summary-row">
                   <span>Trigger Price</span>
-                  <strong>{formatCurr(triggerPriceNum)}</strong>
+                  <strong>{formatCurr(triggerPriceNum > 0 ? triggerPriceNum : (trailingDistanceNum > 0 ? (trailingDistanceType === 'percent' ? price * (1 - trailingDistanceNum / 100) : price - trailingDistanceNum) : price))}</strong>
                 </div>
               )}
               <div className="order-summary-row">
@@ -232,6 +438,28 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
                 <span>Estimated Value</span>
                 <strong style={{ color: sideColor }}>{formatCurrShort(estimatedValue)}</strong>
               </div>
+
+              {isGTT && (
+                <>
+                  <div className="order-summary-row">
+                    <span>Order Mechanism</span>
+                    <strong className="text-primary">Good-Till-Triggered (GTT)</strong>
+                  </div>
+                  <div className="order-summary-row">
+                    <span>Validity</span>
+                    <strong>{expiryMode === 'GTC' ? 'Good-Till-Cancelled (GTC)' : `Expires ${expiryDate || '—'}`}</strong>
+                  </div>
+                </>
+              )}
+
+              {isGTT && trailingEnabled && trailingDistanceNum > 0 && (
+                <div className="order-summary-row">
+                  <span>Trailing Stop</span>
+                  <strong className="text-primary">
+                    {trailingDistance}{trailingDistanceType === 'percent' ? '%' : ' pts'} (Dynamic)
+                  </strong>
+                </div>
+              )}
 
               {/* ── Pre-order Risk Preview ── */}
               {preOrderRisk && (
@@ -416,7 +644,18 @@ const StockDetail = () => {
     '1Y': 'Past Year',
   };
 
-  const handleOrderSubmit = (side: OrderSide, orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => {
+  const handleOrderSubmit = (
+    side: OrderSide,
+    orderType: OrderType,
+    quantity: number,
+    limitPrice?: number,
+    triggerPrice?: number,
+    gttOptions?: {
+      isGTT?: boolean;
+      expiry?: string | null;
+      trailingConfig?: TrailingStopConfig | null;
+    }
+  ) => {
     const result = placeOrder({
       symbol: symbol!,
       companyName: stock.companyName,
@@ -425,7 +664,10 @@ const StockDetail = () => {
       quantity,
       limitPrice,
       triggerPrice,
-      currentPrice: stock.price
+      currentPrice: stock.price,
+      isGTT: gttOptions?.isGTT,
+      expiry: gttOptions?.expiry,
+      trailingConfig: gttOptions?.trailingConfig ?? undefined
     });
 
     if (result.success) {
@@ -435,9 +677,12 @@ const StockDetail = () => {
           message: 'Order executed successfully. ID: ' + (result.order?.id ?? '') + ' — Execution Price: ' + formatCurrency(result.execution.executionPrice)
         });
       } else {
+        const orderLabel = gttOptions?.isGTT
+          ? `GTT ${gttOptions.trailingConfig ? 'Trailing ' : ''}`
+          : (orderType === 'LIMIT' ? 'Limit ' : 'Conditional ');
         setToast({
           type: 'success',
-          message: `${orderType === 'LIMIT' ? 'Limit' : 'Conditional'} order placed. ID: ` + (result.order?.id ?? '') + ' — Status: PENDING'
+          message: `${orderLabel}order placed. ID: ` + (result.order?.id ?? '') + ' — Status: PENDING'
         });
       }
     } else {
@@ -842,7 +1087,7 @@ const StockDetail = () => {
           holdings={holdings}
           stocks={stocks}
           onClose={() => setOrderModal(null)}
-          onPlaceOrder={(orderType, qty, lp, tp) => handleOrderSubmit(orderModal.side, orderType, qty, lp, tp)}
+          onPlaceOrder={(orderType, qty, lp, tp, gttOptions) => handleOrderSubmit(orderModal.side, orderType, qty, lp, tp, gttOptions)}
         />
       )}
 

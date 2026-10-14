@@ -12,7 +12,7 @@ import {
   ChevronUp, ChevronDown, Filter, SearchX, Clock, Grid as GridIcon,
   List as ListIcon
 } from 'lucide-react';
-import { StockData, OrderSide, OrderType } from '../types';
+import { StockData, OrderSide, OrderType, TrailingStopConfig } from '../types';
 
 type FilterMode = 'ALL' | 'GAINERS' | 'LOSERS' | 'SECTOR';
 type SortField = 'companyName' | 'symbol' | 'price' | 'change' | 'changePercent';
@@ -235,7 +235,17 @@ const Watchlist: React.FC = () => {
   };
 
   // Handle order submission from OrderEntry modal
-  const handleOrderPlace = (orderType: OrderType, quantity: number, limitPrice?: number, triggerPrice?: number) => {
+  const handleOrderPlace = (
+    orderType: OrderType,
+    quantity: number,
+    limitPrice?: number,
+    triggerPrice?: number,
+    gttOptions?: {
+      isGTT?: boolean;
+      expiry?: string | null;
+      trailingConfig?: TrailingStopConfig | null;
+    }
+  ) => {
     if (!orderModal) return;
 
     const result = placeOrder({
@@ -246,14 +256,25 @@ const Watchlist: React.FC = () => {
       quantity,
       limitPrice,
       triggerPrice,
-      currentPrice: orderModal.price
+      currentPrice: orderModal.price,
+      isGTT: gttOptions?.isGTT,
+      expiry: gttOptions?.expiry,
+      trailingConfig: gttOptions?.trailingConfig ?? undefined
     });
 
     if (result.success) {
-      setToast({
-        type: 'success',
-        message: `Order executed: ${orderModal.side} ${quantity} ${orderModal.symbol} at ${formatCurrency(result.execution?.executionPrice ?? orderModal.price)}`
-      });
+      if (result.execution) {
+        setToast({
+          type: 'success',
+          message: `Order executed: ${orderModal.side} ${quantity} ${orderModal.symbol} at ${formatCurrency(result.execution.executionPrice)}`
+        });
+      } else {
+        const orderLabel = gttOptions?.isGTT ? 'GTT order placed' : `${orderType.replace('_', ' ')} order placed`;
+        setToast({
+          type: 'success',
+          message: `${orderLabel}: ${orderModal.side} ${quantity} ${orderModal.symbol} (PENDING)`
+        });
+      }
     } else {
       setToast({ type: 'error', message: result.error ?? 'Order failed.' });
     }

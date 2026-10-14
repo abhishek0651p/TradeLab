@@ -132,9 +132,45 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCanc
             <span className="d17-detail-value">{formatCurrency(order.totalValue)}</span>
           </div>
         )}
+        {order.isGTT && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Mechanism</span>
+            <span className="d17-detail-value d20-gtt-badge-text">
+              Good-Till-Triggered (GTT)
+            </span>
+          </div>
+        )}
+        {order.isGTT && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Validity</span>
+            <span className="d17-detail-value">
+              {order.expiry ? `GTD: ${formatDateTime(order.expiry)}` : 'GTC (Good-Till-Cancelled)'}
+            </span>
+          </div>
+        )}
+        {order.trailingConfig && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Trailing Distance</span>
+            <span className="d17-detail-value text-primary">
+              {order.trailingConfig.distance}{order.trailingConfig.distanceType === 'percent' ? '%' : ' ₹'} (Trailing Stop)
+            </span>
+          </div>
+        )}
+        {order.highestPriceSinceCreation !== undefined && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Reference Peak</span>
+            <span className="d17-detail-value">{formatCurrency(order.highestPriceSinceCreation)}</span>
+          </div>
+        )}
+        {order.lowestPriceSinceCreation !== undefined && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Reference Trough</span>
+            <span className="d17-detail-value">{formatCurrency(order.lowestPriceSinceCreation)}</span>
+          </div>
+        )}
         {order.rejectionReason && (
           <div className="d17-detail-item d17-reason-item">
-            <span className="d17-detail-label">Rejection Reason</span>
+            <span className="d17-detail-label">{order.rejectionReason.toLowerCase().includes('expired') ? 'Expiry Reason' : 'Rejection Reason'}</span>
             <span className="d17-detail-value text-danger">{order.rejectionReason}</span>
           </div>
         )}
@@ -189,14 +225,16 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCanc
             </div>
           )}
 
-          {/* Rejected */}
+          {/* Rejected or Expired */}
           {order.status === 'REJECTED' && (
             <div className="d17-lifecycle-node">
               <div className="d17-lifecycle-dot d17-lifecycle-rejected" />
               <div className="d17-lifecycle-content">
-                <div className="d17-lifecycle-event">Order Rejected</div>
+                <div className="d17-lifecycle-event">
+                  {order.rejectionReason?.toLowerCase().includes('expired') ? 'Order Expired' : 'Order Rejected'}
+                </div>
                 <div className="d17-lifecycle-time">
-                  {order.rejectionReason ? 'Validation failed' : '—'}
+                  {order.rejectionReason ?? 'Validation failed'}
                 </div>
               </div>
             </div>

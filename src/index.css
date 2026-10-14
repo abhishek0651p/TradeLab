@@ -6535,3 +6535,204 @@ tr:hover td {
     padding: 32px 16px;
   }
 }
+
+/* ══════════════════════════════════════════════
+   DAY 20: ADVANCED ORDER EXECUTION & GTT STYLES
+   Scoped with .d20-gtt-* prefix
+   ══════════════════════════════════════════════ */
+
+.d20-gtt-container {
+  margin-top: 16px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.d20-gtt-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.d20-gtt-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.d20-gtt-checkbox {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.d20-gtt-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.d20-gtt-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.d20-gtt-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  margin-left: 27px;
+}
+
+.d20-gtt-pill {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  letter-spacing: 0.5px;
+}
+
+.d20-gtt-pill-trailing {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.d20-gtt-body {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(51, 65, 85, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.d20-gtt-mode-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.d20-gtt-mode-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.d20-gtt-mode-btn:hover {
+  background: rgba(51, 65, 85, 0.6);
+  color: var(--text-main);
+}
+
+.d20-gtt-mode-active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: var(--primary);
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.d20-gtt-trailing-section {
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(51, 65, 85, 0.8);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.d20-gtt-trailing-inputs {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.d20-gtt-trailing-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.d20-gtt-dist-type {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.d20-gtt-unit-btn {
+  padding: 7px 12px;
+  background: rgba(30, 41, 59, 0.9);
+  color: var(--text-muted);
+  border: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.d20-gtt-unit-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.d20-gtt-dist-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.d20-gtt-dist-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Badges for tables and order details */
+.d20-gtt-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  letter-spacing: 0.4px;
+}
+
+.d20-gtt-trailing-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  letter-spacing: 0.4px;
+}
+
+.d20-gtt-badge-text {
+  color: #60a5fa;
+  font-weight: 600;
+}

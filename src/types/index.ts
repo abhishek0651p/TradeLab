@@ -64,6 +64,19 @@ export interface Order {
   executedAt: string | null;
   cancelledAt: string | null;
   rejectionReason: string | null;
+
+  // Day 20: GTT / Conditional order extensions
+  isGTT?: boolean;                    // Good-Till-Triggered flag
+  expiry?: string | null;             // ISO timestamp for Good-Till-Date; null = Good-Till-Cancelled
+  trailingConfig?: TrailingStopConfig; // Trailing stop configuration
+  highestPriceSinceCreation?: number; // For trailing SELL stop: highest price observed
+  lowestPriceSinceCreation?: number;  // For trailing BUY stop: lowest price observed
+}
+
+export interface TrailingStopConfig {
+  distance: number;           // Distance from peak/trough (absolute or percent)
+  distanceType: 'absolute' | 'percent'; // How distance is specified
+  // Direction is inferred from order side: SELL trails highest price (protect downside), BUY trails lowest price (protect upside)
 }
 
 export interface Execution {
@@ -87,6 +100,10 @@ export interface PlaceOrderParams {
   limitPrice?: number;
   triggerPrice?: number;
   currentPrice: number;
+  // Day 20: GTT / conditional order extensions
+  isGTT?: boolean;
+  expiry?: string | null; // ISO timestamp for Good-Till-Date; null/undefined = Good-Till-Cancelled
+  trailingConfig?: TrailingStopConfig;
 }
 
 export interface PlaceOrderResult {

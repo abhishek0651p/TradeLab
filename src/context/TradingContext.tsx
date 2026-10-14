@@ -360,27 +360,76 @@ const validateOrder = (
     }
   }
 
+  // Determine effective trigger price if trailingConfig is present
+  const effectiveTriggerPrice = params.triggerPrice ?? (
+    params.isGTT && params.trailingConfig
+      ? (params.side === 'SELL'
+          ? (params.trailingConfig.distanceType === 'percent'
+              ? Number((params.currentPrice * (1 - params.trailingConfig.distance / 100)).toFixed(2))
+              : Number((params.currentPrice - params.trailingConfig.distance).toFixed(2)))
+          : (params.trailingConfig.distanceType === 'percent'
+              ? Number((params.currentPrice * (1 + params.trailingConfig.distance / 100)).toFixed(2))
+              : Number((params.currentPrice + params.trailingConfig.distance).toFixed(2))))
+      : undefined
+  );
+
   // Validate trigger price for STOP / TARGET orders
   if (['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(params.orderType)) {
-    if (params.triggerPrice === undefined || params.triggerPrice === null || params.triggerPrice <= 0) {
+    if (effectiveTriggerPrice === undefined || effectiveTriggerPrice === null || effectiveTriggerPrice <= 0) {
       return { valid: false, error: 'Trigger price must be greater than zero.' };
     }
 
     // Logic constraints
     if (params.orderType === 'STOP_MARKET' || params.orderType === 'STOP_LIMIT') {
-      if (params.side === 'BUY' && params.triggerPrice <= params.currentPrice) {
+      if (params.side === 'BUY' && effectiveTriggerPrice <= params.currentPrice) {
         return { valid: false, error: 'Buy Stop trigger must be above current market price.' };
       }
-      if (params.side === 'SELL' && params.triggerPrice >= params.currentPrice) {
+      if (params.side === 'SELL' && effectiveTriggerPrice >= params.currentPrice) {
         return { valid: false, error: 'Sell Stop trigger must be below current market price.' };
       }
     }
     if (params.orderType === 'TARGET') {
-      if (params.side === 'BUY' && params.triggerPrice >= params.currentPrice) {
+      if (params.side === 'BUY' && effectiveTriggerPrice >= params.currentPrice) {
         return { valid: false, error: 'Buy Target trigger must be below current market price.' };
       }
-      if (params.side === 'SELL' && params.triggerPrice <= params.currentPrice) {
+      if (params.side === 'SELL' && effectiveTriggerPrice <= params.currentPrice) {
         return { valid: false, error: 'Sell Target trigger must be above current market price.' };
+      }
+    }
+  }
+
+  // Day 20: GTT validation
+  if (params.isGTT) {
+    if (params.orderType === 'MARKET') {
+      return { valid: false, error: 'GTT cannot be applied to immediate Market orders.' };
+    }
+
+    if (params.expiry) {
+      const expiryTime = new Date(params.expiry).getTime();
+      if (isNaN(expiryTime)) {
+        return { valid: false, error: 'Invalid expiry date format.' };
+      }
+      if (expiryTime <= Date.now()) {
+        return { valid: false, error: 'Expiry date must be in the future.' };
+      }
+    }
+
+    if (params.trailingConfig) {
+      if (params.side !== 'SELL') {
+        return { valid: false, error: 'Trailing stop-loss is only supported for protective SELL orders on existing holdings.' };
+      }
+      if (!['STOP_MARKET', 'STOP_LIMIT'].includes(params.orderType)) {
+        return { valid: false, error: 'Trailing stop-loss requires a Stop-Market (SL-M) or Stop-Limit (SL-L) order type.' };
+      }
+      const { distance, distanceType } = params.trailingConfig;
+      if (typeof distance !== 'number' || isNaN(distance) || distance <= 0) {
+        return { valid: false, error: 'Trailing distance must be greater than zero.' };
+      }
+      if (distanceType === 'percent' && (distance <= 0 || distance >= 100)) {
+        return { valid: false, error: 'Trailing percent distance must be between 0.1% and 99.9%.' };
+      }
+      if (distanceType === 'absolute' && distance >= params.currentPrice) {
+        return { valid: false, error: 'Trailing distance cannot exceed current market price.' };
       }
     }
   }
@@ -389,7 +438,7 @@ const validateOrder = (
   if (params.side === 'BUY') {
     let checkPrice = params.currentPrice;
     if (params.orderType === 'LIMIT' || params.orderType === 'STOP_LIMIT') checkPrice = params.limitPrice!;
-    else if (params.orderType === 'STOP_MARKET' || params.orderType === 'TARGET') checkPrice = params.triggerPrice!;
+    else if (params.orderType === 'STOP_MARKET' || params.orderType === 'TARGET') checkPrice = effectiveTriggerPrice!;
 
     const requiredCash = checkPrice * params.quantity;
     if (cashBalance < requiredCash) {
@@ -658,6 +707,30 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const now = new Date().toISOString();
     const requestedPrice = params.orderType === 'LIMIT' ? (params.limitPrice ?? params.currentPrice) : params.currentPrice;
 
+    // Determine initial triggerPrice and trailing reference price
+    let triggerPrice = params.triggerPrice;
+    let highestPriceSinceCreation: number | undefined = undefined;
+    let lowestPriceSinceCreation: number | undefined = undefined;
+
+    if (params.isGTT && params.trailingConfig) {
+      const { distance, distanceType } = params.trailingConfig;
+      if (params.side === 'SELL') {
+        highestPriceSinceCreation = params.currentPrice;
+        if (triggerPrice === undefined || triggerPrice <= 0) {
+          triggerPrice = distanceType === 'percent'
+            ? Number((params.currentPrice * (1 - distance / 100)).toFixed(2))
+            : Number((params.currentPrice - distance).toFixed(2));
+        }
+      } else if (params.side === 'BUY') {
+        lowestPriceSinceCreation = params.currentPrice;
+        if (triggerPrice === undefined || triggerPrice <= 0) {
+          triggerPrice = distanceType === 'percent'
+            ? Number((params.currentPrice * (1 + distance / 100)).toFixed(2))
+            : Number((params.currentPrice + distance).toFixed(2));
+        }
+      }
+    }
+
     // Create the order
     const order: Order = {
       id: generateOrderId(),
@@ -667,14 +740,21 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       type: params.orderType,
       quantity: params.quantity,
       requestedPrice,
-      triggerPrice: params.triggerPrice,
+      triggerPrice,
       executionPrice: null,
       totalValue: null,
       status: 'PENDING' as OrderStatus,
       createdAt: now,
       executedAt: null,
       cancelledAt: null,
-      rejectionReason: null
+      rejectionReason: null,
+
+      // Day 20: GTT / conditional order fields
+      isGTT: params.isGTT ?? false,
+      expiry: params.expiry ?? null,
+      trailingConfig: params.trailingConfig ?? undefined,
+      highestPriceSinceCreation,
+      lowestPriceSinceCreation
     };
 
     // MARKET order — execute immediately
@@ -819,12 +899,90 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (processedIds.has(order.id)) continue;
 
       // Check current status in local working array (not just the snapshot)
-      const currentState = updatedOrders.find(o => o.id === order.id);
-      if (!currentState || (currentState.status !== 'PENDING' && currentState.status !== 'TRIGGERED')) continue;
+      const orderIdx = updatedOrders.findIndex(o => o.id === order.id);
+      if (orderIdx < 0) continue;
+      const currentState = { ...updatedOrders[orderIdx] };
+      if (currentState.status !== 'PENDING' && currentState.status !== 'TRIGGERED') continue;
 
-      const stock = currentStocks.find(s => s.symbol === order.symbol);
+      // Day 20: Expiry check — reject Good-Till-Date orders that have expired
+      if (currentState.isGTT && currentState.expiry) {
+        const expiryTime = new Date(currentState.expiry).getTime();
+        const now = Date.now();
+        if (now > expiryTime) {
+          // Order expired — reject it cleanly
+          updatedOrders[orderIdx] = {
+            ...currentState,
+            status: 'REJECTED' as OrderStatus,
+            rejectionReason: 'Order has expired.',
+            executedAt: null,
+          };
+          addNotification(
+            'ORDER_REJECTED',
+            'ERROR',
+            'Order Expired',
+            `${currentState.side} ${currentState.quantity} ${currentState.symbol} — order has expired.`,
+            { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
+          );
+          processedIds.add(currentState.id);
+          rejected++;
+          continue;
+        }
+      }
+
+      const stock = currentStocks.find(s => s.symbol === currentState.symbol);
       if (!stock) continue;
       const currentPrice = stock.price;
+
+      // Day 20: Update trailing stop trigger price (only in favorable direction)
+      if (currentState.isGTT && currentState.trailingConfig) {
+        const { distance, distanceType } = currentState.trailingConfig;
+        const side = currentState.side;
+
+        if (side === 'SELL') {
+          // Reference peak: highest price observed since order creation
+          const peak = currentState.highestPriceSinceCreation ?? currentPrice;
+          if (currentPrice > peak) {
+            // Price made a new high! Advance reference peak and recalculate trigger upward only
+            const newPeak = currentPrice;
+            const newTrigger = distanceType === 'percent'
+              ? Number((newPeak * (1 - distance / 100)).toFixed(2))
+              : Number((newPeak - distance).toFixed(2));
+
+            const prevTrigger = currentState.triggerPrice ?? 0;
+            if (newTrigger > prevTrigger) {
+              currentState.highestPriceSinceCreation = newPeak;
+              currentState.triggerPrice = newTrigger;
+              updatedOrders[orderIdx] = {
+                ...updatedOrders[orderIdx],
+                highestPriceSinceCreation: newPeak,
+                triggerPrice: newTrigger
+              };
+            }
+          }
+          // If currentPrice <= peak: price fell or remained flat, peak and trigger stay unchanged
+        } else if (side === 'BUY') {
+          // Fallback if BUY trailing stop is ever used
+          const trough = currentState.lowestPriceSinceCreation ?? currentPrice;
+          if (currentPrice < trough) {
+            // Price made a new low! Advance reference trough and recalculate trigger downward only
+            const newTrough = currentPrice;
+            const newTrigger = distanceType === 'percent'
+              ? Number((newTrough * (1 + distance / 100)).toFixed(2))
+              : Number((newTrough + distance).toFixed(2));
+
+            const prevTrigger = currentState.triggerPrice ?? Infinity;
+            if (newTrigger < prevTrigger) {
+              currentState.lowestPriceSinceCreation = newTrough;
+              currentState.triggerPrice = newTrigger;
+              updatedOrders[orderIdx] = {
+                ...updatedOrders[orderIdx],
+                lowestPriceSinceCreation: newTrough,
+                triggerPrice: newTrigger
+              };
+            }
+          }
+        }
+      }
 
       // 1. Evaluate Conditions
       let conditionMet = false;
@@ -853,10 +1011,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // 2. If it's just transitioning to TRIGGERED (STOP_LIMIT)
       if (newStatus === 'TRIGGERED') {
-        const idx = updatedOrders.findIndex(o => o.id === order.id);
-        if (idx >= 0) {
-          updatedOrders[idx] = { ...currentState, status: 'TRIGGERED' };
-        }
+        updatedOrders[orderIdx] = { ...currentState, status: 'TRIGGERED' };
         addNotification(
           'ORDER_TRIGGERED',
           'WARNING',
@@ -864,7 +1019,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           `${currentState.side} ${currentState.quantity} ${currentState.symbol} @ ${formatINR(currentState.triggerPrice ?? currentState.requestedPrice)}`,
           { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
         );
-        processedIds.add(order.id);
+        processedIds.add(currentState.id);
         continue;
       }
 
@@ -878,14 +1033,11 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (!revalidation.valid) {
         // Rejected — order goes to REJECTED state, no state mutation
-        const idx = updatedOrders.findIndex(o => o.id === order.id);
-        if (idx >= 0) {
-          updatedOrders[idx] = {
-            ...currentState,
-            status: 'REJECTED' as OrderStatus,
-            rejectionReason: revalidation.reason ?? 'Order validation failed at execution.'
-          };
-        }
+        updatedOrders[orderIdx] = {
+          ...currentState,
+          status: 'REJECTED' as OrderStatus,
+          rejectionReason: revalidation.reason ?? 'Order validation failed at execution.'
+        };
         addNotification(
           'ORDER_REJECTED',
           'ERROR',
@@ -893,7 +1045,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           `${currentState.side} ${currentState.quantity} ${currentState.symbol} — ${revalidation.reason ?? 'Order validation failed.'}`,
           { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
         );
-        processedIds.add(order.id);
+        processedIds.add(currentState.id);
         rejected++;
         continue;
       }
@@ -906,16 +1058,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       holdingsRef.current = result.newHoldings;
 
       // Mark order executed in our local array
-      const idx = updatedOrders.findIndex(o => o.id === order.id);
-      if (idx >= 0) {
-        updatedOrders[idx] = {
-          ...currentState,
-          executionPrice: Number(currentPrice.toFixed(2)),
-          totalValue: result.execution.totalValue,
-          status: 'EXECUTED' as OrderStatus,
-          executedAt: result.execution.executedAt
-        };
-      }
+      updatedOrders[orderIdx] = {
+        ...currentState,
+        executionPrice: Number(currentPrice.toFixed(2)),
+        totalValue: result.execution.totalValue,
+        status: 'EXECUTED' as OrderStatus,
+        executedAt: result.execution.executedAt
+      };
 
       newExecutions.push(result.execution);
       newTrades.push(result.trade);
@@ -1040,6 +1189,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setTick(nextTick);
     setStocks(currentStocks => {
       const updated = simulateMarketUpdate(currentStocks, nextTick);
+      stocksRef.current = updated;
 
       // Market alert: notify when a stock crosses the ±5% threshold
       updated.forEach(stock => {
