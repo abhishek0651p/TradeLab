@@ -144,3 +144,15 @@ export interface ChartDataPoint {
   volume: number;
 }
 
+/** A recorded portfolio snapshot — timestamp + key metrics */
+export interface PortfolioSnapshot {
+  id: string;
+  timestamp: number; // ISO epoch ms when recorded
+  totalAccountValue: number;
+  totalCurrentValue: number;
+  totalInvestedValue: number;
+  totalUnrealizedPnL: number;
+  realizedPnL: number;
+  totalReturnPercent: number;
+}
+

@@ -13,7 +13,8 @@ import {
   PlaceOrderResult,
   Notification,
   NotificationType,
-  NotificationPriority
+  NotificationPriority,
+  PortfolioSnapshot
 } from '../types';
 import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS, simulateMarketUpdate } from '../data/mockData';
 
@@ -66,6 +67,8 @@ interface TradingContextType {
   cancelOrder: (orderId: string) => { success: boolean; error?: string };
   processPendingOrders: () => { processed: number; executed: number; rejected: number };
   simulateTick: () => void;
+  portfolioSnapshots: PortfolioSnapshot[];
+  recordPortfolioSnapshot: () => void;
   resetAccount: () => void;
   updateSettings: (patch: Partial<TradingSettings>) => void;
   markNotificationRead: (id: string) => void;
@@ -501,6 +504,20 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
   const [autoSimActive, setAutoSimActive] = useState(false);
 
+  // ── Portfolio Snapshots (Day 21) ──
+  const [portfolioSnapshots, setPortfolioSnapshots] = useState<PortfolioSnapshot[]>(() => {
+    const raw = safeLoadJSON<PortfolioSnapshot[]>('tradelab_portfolio_snapshots', []);
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(s =>
+      s &&
+      typeof s.id === 'string' &&
+      typeof s.timestamp === 'number' &&
+      !isNaN(s.timestamp) &&
+      typeof s.totalAccountValue === 'number' &&
+      !isNaN(s.totalAccountValue)
+    );
+  });
+
   // ── Notification state (Day 16) ──
   const [notifications, setNotifications] = useState<Notification[]>(() =>
     safeLoadJSON<Notification[]>('tradelab_notifications', [])
@@ -510,6 +527,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Refs for atomic reads of latest state
   const accountRef = useRef(account);
   const holdingsRef = useRef(holdings);
+  const tradesRef = useRef(trades);
   const stocksRef = useRef(stocks);
   const ordersRef = useRef(orders);
   const notificationsRef = useRef(notifications);
@@ -518,6 +536,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => { accountRef.current = account; }, [account]);
   useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
+  useEffect(() => { tradesRef.current = trades; }, [trades]);
   useEffect(() => { stocksRef.current = stocks; }, [stocks]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
@@ -534,6 +553,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_tick', JSON.stringify(tick)); }, [tick]);
   useEffect(() => { localStorage.setItem('tradelab_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('tradelab_notifications', JSON.stringify(notifications)); }, [notifications]);
+  useEffect(() => { localStorage.setItem('tradelab_portfolio_snapshots', JSON.stringify(portfolioSnapshots)); }, [portfolioSnapshots]);
 
   // ── Watchlist ──
 
@@ -1137,8 +1157,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setStocks(MOCK_STOCKS);
     setTick(0);
 
-    // Clear notifications first, then add reset notification
+    // Clear notifications and snapshots first, then add reset notification
     setNotifications([]);
+    setPortfolioSnapshots([]);
 
     // Clear ALL persisted keys so a page refresh doesn't restore stale data
     localStorage.removeItem('tradelab_account');
@@ -1150,6 +1171,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem('tradelab_stocks');
     localStorage.removeItem('tradelab_tick');
     localStorage.removeItem('tradelab_notifications');
+    localStorage.removeItem('tradelab_portfolio_snapshots');
     // Note: tradelab_settings is intentionally preserved across resets
 
     // Add reset notification AFTER clearing — this survives because
@@ -1179,6 +1201,50 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, []);
 
+  // ── Portfolio Snapshot Recording (Day 21) ──
+
+  const lastSnapshotTickRef = useRef<number>(-1);
+
+  const recordPortfolioSnapshot = useCallback((overrideStocks?: StockData[], tickNum?: number) => {
+    const activeStocks = overrideStocks ?? stocksRef.current;
+    const summary = aggregatePortfolio(
+      holdingsRef.current,
+      activeStocks,
+      accountRef.current,
+      tradesRef.current
+    );
+
+    const now = Date.now();
+    const snapshot: PortfolioSnapshot = {
+      id: `SNP-${now}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      timestamp: now,
+      totalAccountValue: summary.totalAccountValue,
+      totalCurrentValue: summary.totalCurrentValue,
+      totalInvestedValue: summary.totalInvestedValue,
+      totalUnrealizedPnL: summary.totalUnrealizedPnL,
+      realizedPnL: summary.realizedPnL,
+      totalReturnPercent: summary.totalReturnPercent
+    };
+
+    setPortfolioSnapshots(prev => {
+      // Guard against duplicate recording for the exact same tick or same millisecond
+      if (tickNum !== undefined && tickNum === lastSnapshotTickRef.current) {
+        return prev;
+      }
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1];
+        if (now === last.timestamp && last.totalAccountValue === snapshot.totalAccountValue) {
+          return prev;
+        }
+      }
+      if (tickNum !== undefined) {
+        lastSnapshotTickRef.current = tickNum;
+      }
+      const updated = [...prev, snapshot];
+      return updated.length > 100 ? updated.slice(-100) : updated;
+    });
+  }, []);
+
   // ── Simulate market update ──
 
   const tickRef = useRef(tick);
@@ -1186,32 +1252,36 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const simulateTick = useCallback(() => {
     const nextTick = tickRef.current + 1;
+    tickRef.current = nextTick;
     setTick(nextTick);
-    setStocks(currentStocks => {
-      const updated = simulateMarketUpdate(currentStocks, nextTick);
-      stocksRef.current = updated;
 
-      // Market alert: notify when a stock crosses the ±5% threshold
-      updated.forEach(stock => {
-        const nowAbove = Math.abs(stock.changePercent) >= 5;
-        const wasAbove = marketAlertStateRef.current[stock.symbol] ?? false;
-        if (nowAbove && !wasAbove) {
-          const direction = stock.changePercent >= 0 ? 'up' : 'down';
-          addNotification(
-            'MARKET_EVENT',
-            'WARNING',
-            'Market Alert',
-            `${stock.symbol} is ${direction} ${Math.abs(stock.changePercent).toFixed(1)}% today.`,
-            { symbol: stock.symbol, route: `/stock/${stock.symbol}` }
-          );
-        }
-        // Update threshold state for this stock
-        setMarketAlertState(prev => ({ ...prev, [stock.symbol]: nowAbove }));
-      });
+    // Compute updated stock prices deterministically
+    const updatedStocks = simulateMarketUpdate(stocksRef.current, nextTick);
+    stocksRef.current = updatedStocks;
+    setStocks(updatedStocks);
 
-      return updated;
+    // Market alert: notify when a stock crosses the ±5% threshold
+    const alertUpdates: Record<string, boolean> = {};
+    updatedStocks.forEach(stock => {
+      const nowAbove = Math.abs(stock.changePercent) >= 5;
+      const wasAbove = marketAlertStateRef.current[stock.symbol] ?? false;
+      if (nowAbove && !wasAbove) {
+        const direction = stock.changePercent >= 0 ? 'up' : 'down';
+        addNotification(
+          'MARKET_EVENT',
+          'WARNING',
+          'Market Alert',
+          `${stock.symbol} is ${direction} ${Math.abs(stock.changePercent).toFixed(1)}% today.`,
+          { symbol: stock.symbol, route: `/stock/${stock.symbol}` }
+        );
+      }
+      alertUpdates[stock.symbol] = nowAbove;
     });
-  }, [addNotification]);
+    setMarketAlertState(prev => ({ ...prev, ...alertUpdates }));
+
+    // Record portfolio snapshot reflecting the newly updated prices (Day 21)
+    recordPortfolioSnapshot(updatedStocks, nextTick);
+  }, [addNotification, recordPortfolioSnapshot]);
 
   // ── Auto-simulation interval (Day 15) ──
 
@@ -1262,6 +1332,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cancelOrder,
       processPendingOrders,
       simulateTick,
+      portfolioSnapshots,
+      recordPortfolioSnapshot,
       resetAccount,
       updateSettings,
       markNotificationRead,

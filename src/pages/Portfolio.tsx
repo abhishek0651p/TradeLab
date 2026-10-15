@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTrading, enrichHoldings, aggregatePortfolio } from '../context/TradingContext';
 import {
@@ -16,7 +16,15 @@ import {
   TrendingUp,
   Wallet,
   Shield,
-  Zap
+  Zap,
+  History,
+  Scale,
+  CheckCircle2,
+  XCircle,
+  MinusCircle,
+  Info,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -138,8 +146,9 @@ const barTooltipContent = ({ active, payload }: any) => {
 /* ── Component ── */
 
 const Portfolio = () => {
-  const { account, holdings, stocks, trades } = useTrading();
+  const { account, holdings, stocks, trades, portfolioSnapshots, simulateTick } = useTrading();
   const navigate = useNavigate();
+  const [perfChartTab, setPerfChartTab] = useState<'snapshots' | 'derived'>('snapshots');
 
   const hasHoldings = holdings.length > 0;
 
@@ -302,6 +311,274 @@ const Portfolio = () => {
       unrealizedPnLPercent: row.unrealizedPnLPercent
     }));
   }, [holdingsWithAllocation]);
+
+  /* ── Day 21 Analytics: Herfindahl-Hirschman Index (HHI) ──
+   * HHI = sum of squared percentage weights of individual holdings (0 to 10,000 scale).
+   * US DOJ / FTC benchmarks:
+   *   < 1,500        → High Diversification (Low concentration risk)
+   *   1,500 – 2,500  → Moderate Concentration
+   *   > 2,500        → High Concentration (Dominated by few holdings)
+   */
+
+  const hhiAnalysis = useMemo(() => {
+    if (holdingsWithAllocation.length === 0 || totalCurrentValue <= 0) {
+      return {
+        score: 0,
+        level: 'Uninvested' as const,
+        color: '#64748b',
+        badgeClass: 'd21-portfolio-badge-neutral',
+        description: 'No active holdings. HHI concentration cannot be evaluated with zero invested equity.'
+      };
+    }
+
+    let sumSquaredWeights = 0;
+    for (const h of holdingsWithAllocation) {
+      const val = Math.max(0, h.currentValue || 0);
+      const weight = (val / totalCurrentValue) * 100;
+      sumSquaredWeights += weight * weight;
+    }
+
+    const score = Math.round(sumSquaredWeights);
+
+    if (score < 1500) {
+      return {
+        score,
+        level: 'High Diversification' as const,
+        color: '#10b981',
+        badgeClass: 'd21-portfolio-badge-success',
+        description: 'HHI < 1,500 indicates broad diversification with low single-asset concentration risk.'
+      };
+    } else if (score <= 2500) {
+      return {
+        score,
+        level: 'Moderate Concentration' as const,
+        color: '#f59e0b',
+        badgeClass: 'd21-portfolio-badge-warning',
+        description: 'HHI 1,500–2,500 indicates moderate concentration. A few positions hold significant weight.'
+      };
+    } else {
+      return {
+        score,
+        level: 'High Concentration' as const,
+        color: '#ef4444',
+        badgeClass: 'd21-portfolio-badge-danger',
+        description: 'HHI > 2,500 indicates high concentration. Portfolio outcome is heavily dependent on a few positions.'
+      };
+    }
+  }, [holdingsWithAllocation, totalCurrentValue]);
+
+  /* ── Day 21 Analytics: Cash Allocation Indicator ──
+   * Cash Allocation % = (cashBalance / totalAccountValue) * 100
+   * Measures liquidity buffer and market sensitivity.
+   */
+
+  const cashAllocation = useMemo(() => {
+    const safeTotal = Math.max(0, totalAccountValue || 0);
+    const safeCash = Math.max(0, account.cashBalance || 0);
+    const safeInvested = Math.max(0, totalCurrentValue || 0);
+
+    const cashPercent = safeTotal > 0 ? Math.min(100, Math.max(0, (safeCash / safeTotal) * 100)) : 0;
+    const investedPercent = Math.max(0, 100 - cashPercent);
+
+    let stance: 'Defensive / High Cash' | 'Balanced Allocation' | 'Aggressive / High Equity' = 'Balanced Allocation';
+    let description = '';
+
+    if (cashPercent >= 50) {
+      stance = 'Defensive / High Cash';
+      description = `${cashPercent.toFixed(1)}% held in liquid cash. Provides capital protection and dry powder with lower market volatility exposure.`;
+    } else if (cashPercent >= 20) {
+      stance = 'Balanced Allocation';
+      description = `${cashPercent.toFixed(1)}% held in cash. Balances capital deployment in equity positions with an active liquidity cushion.`;
+    } else {
+      stance = 'Aggressive / High Equity';
+      description = `${cashPercent.toFixed(1)}% in cash (${investedPercent.toFixed(1)}% in equity). Majority of portfolio value is actively exposed to market movements.`;
+    }
+
+    return {
+      cashBalance: safeCash,
+      investedValue: safeInvested,
+      totalAccountValue: safeTotal,
+      cashPercent,
+      investedPercent,
+      stance,
+      description
+    };
+  }, [account.cashBalance, totalAccountValue, totalCurrentValue]);
+
+  /* ── Day 21 Analytics: Profitable and Losing Holdings ──
+   * Counts positions with positive, negative, and zero (break-even) unrealized P&L.
+   */
+
+  const holdingsHealth = useMemo(() => {
+    const total = holdingsWithAllocation.length;
+    if (total === 0) {
+      return {
+        total: 0,
+        gainers: 0,
+        losers: 0,
+        breakeven: 0,
+        winRate: 0,
+        totalUnrealizedGains: 0,
+        totalUnrealizedLosses: 0
+      };
+    }
+
+    let gainers = 0;
+    let losers = 0;
+    let breakeven = 0;
+    let totalUnrealizedGains = 0;
+    let totalUnrealizedLosses = 0;
+
+    for (const h of holdingsWithAllocation) {
+      if (h.unrealizedPnL > 0) {
+        gainers++;
+        totalUnrealizedGains += h.unrealizedPnL;
+      } else if (h.unrealizedPnL < 0) {
+        losers++;
+        totalUnrealizedLosses += Math.abs(h.unrealizedPnL);
+      } else {
+        breakeven++;
+      }
+    }
+
+    const winRate = total > 0 ? (gainers / total) * 100 : 0;
+
+    return {
+      total,
+      gainers,
+      losers,
+      breakeven,
+      winRate,
+      totalUnrealizedGains,
+      totalUnrealizedLosses
+    };
+  }, [holdingsWithAllocation]);
+
+  /* ── Day 21 Analytics: Sector Exposure Insights ── */
+
+  const sectorInsights = useMemo(() => {
+    if (sectorAllocation.length === 0) {
+      return {
+        topSector: null,
+        sectorCount: 0,
+        concentrationLevel: 'None',
+        badgeClass: 'd21-portfolio-badge-neutral',
+        description: 'No sectors represented. Open positions to see industry allocation.'
+      };
+    }
+
+    const top = sectorAllocation[0];
+    const count = sectorAllocation.length;
+    const isHigh = top.percent > 40;
+    const isMod = top.percent > 25;
+
+    const concentrationLevel = isHigh ? 'High Concentration' : isMod ? 'Moderate Concentration' : 'Well Balanced';
+    const badgeClass = isHigh ? 'd21-portfolio-badge-danger' : isMod ? 'd21-portfolio-badge-warning' : 'd21-portfolio-badge-success';
+    const description = isHigh
+      ? `Dominant exposure in ${top.name} (${top.percent.toFixed(1)}%). Significant vulnerability to industry-specific shocks.`
+      : isMod
+        ? `Lead sector is ${top.name} (${top.percent.toFixed(1)}%) across ${count} active sectors.`
+        : `Well-distributed across ${count} sectors. Top sector (${top.name}) represents only ${top.percent.toFixed(1)}%.`;
+
+    return {
+      topSector: top,
+      sectorCount: count,
+      concentrationLevel,
+      badgeClass,
+      description
+    };
+  }, [sectorAllocation]);
+
+  /* ── Day 21 Analytics: Recorded Performance Snapshots Data ── */
+
+  const snapshotChartData = useMemo(() => {
+    if (!portfolioSnapshots || portfolioSnapshots.length === 0) return [];
+    return [...portfolioSnapshots]
+      .filter(s => s && typeof s.totalAccountValue === 'number' && !isNaN(s.totalAccountValue))
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((s, idx) => {
+        const d = new Date(s.timestamp);
+        const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const dateStr = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+        return {
+          ...s,
+          idx: idx + 1,
+          timeStr,
+          dateStr,
+          displayLabel: `${dateStr} ${timeStr}`,
+          shortLabel: timeStr,
+          totalValue: Number(s.totalAccountValue.toFixed(2)),
+          investedValue: Number(s.totalInvestedValue.toFixed(2)),
+          currentValue: Number(s.totalCurrentValue.toFixed(2)),
+          unrealizedPnL: Number(s.totalUnrealizedPnL.toFixed(2)),
+          realizedPnL: Number(s.realizedPnL.toFixed(2)),
+          returnPercent: Number(s.totalReturnPercent.toFixed(2))
+        };
+      });
+  }, [portfolioSnapshots]);
+
+  const snapshotStats = useMemo(() => {
+    if (snapshotChartData.length === 0) return null;
+    const values = snapshotChartData.map(d => d.totalValue);
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const first = snapshotChartData[0];
+    const latest = snapshotChartData[snapshotChartData.length - 1];
+    const netChange = latest.totalValue - first.totalValue;
+    const netChangePct = first.totalValue > 0 ? (netChange / first.totalValue) * 100 : 0;
+    return {
+      count: snapshotChartData.length,
+      latestValue: latest.totalValue,
+      minVal,
+      maxVal,
+      netChange,
+      netChangePct,
+      firstTime: first.displayLabel,
+      latestTime: latest.displayLabel
+    };
+  }, [snapshotChartData]);
+
+  const snapshotTooltipContent = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const d = payload[0].payload;
+      return (
+        <div className="tooltip-box d21-portfolio-snapshot-tooltip">
+          <div className="tooltip-name">{d.displayLabel}</div>
+          <div className="tooltip-row">
+            <span>Portfolio Value</span>
+            <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>{formatCurrency(d.totalValue)}</span>
+          </div>
+          <div className="tooltip-row">
+            <span>Invested (Cost)</span>
+            <span>{formatCurrency(d.investedValue)}</span>
+          </div>
+          <div className="tooltip-row">
+            <span>Market Value</span>
+            <span>{formatCurrency(d.currentValue)}</span>
+          </div>
+          <div className="tooltip-row">
+            <span>Unrealized P&L</span>
+            <span style={{ color: d.unrealizedPnL >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              {formatSignedCurrency(d.unrealizedPnL)}
+            </span>
+          </div>
+          <div className="tooltip-row">
+            <span>Realized P&L</span>
+            <span style={{ color: d.realizedPnL >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              {formatSignedCurrency(d.realizedPnL)}
+            </span>
+          </div>
+          <div className="tooltip-row">
+            <span>Return vs Starting</span>
+            <span style={{ color: d.returnPercent >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              {formatPercent(d.returnPercent)}
+            </span>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
 
   /* ── Render ── */
 
@@ -559,50 +836,264 @@ const Portfolio = () => {
         </>
       )}
 
-      {/* ── Risk Snapshot (only when holdings exist) ── */}
-      {riskSnapshot && (
-        <>
-          <h2 className="portfolio-section-title">
-            <Shield size={18} />
-            Risk Snapshot
-          </h2>
-          <div className="portfolio-risk-grid">
-            <div className="card portfolio-risk-card">
-              <div className="portfolio-risk-label">Holdings</div>
-              <div className="portfolio-risk-value">{riskSnapshot.holdingsCount}</div>
-              <div className="portfolio-risk-subtitle">positions</div>
-            </div>
-            <div className="card portfolio-risk-card">
-              <div className="portfolio-risk-label">Largest Position</div>
-              <div className="portfolio-risk-value">{riskSnapshot.largestPositionPct.toFixed(1)}%</div>
-              <div className="portfolio-risk-subtitle">of total value</div>
-            </div>
-            <div className="card portfolio-risk-card">
-              <div className="portfolio-risk-label">Gainers / Losers</div>
-              <div className="portfolio-risk-value">
-                <span className="text-success">{riskSnapshot.gainers}</span>
-                {' / '}
-                <span className="text-danger">{riskSnapshot.losers}</span>
+      {/* ── Day 21: Portfolio Risk & Concentration Analytics ── */}
+      <div className="d21-portfolio-section-header">
+        <h2 className="portfolio-section-title" style={{ margin: 0 }}>
+          <Shield size={18} />
+          Risk & Diversification Analytics
+        </h2>
+        <button
+          className="d21-portfolio-sim-btn"
+          onClick={() => simulateTick()}
+          title="Advance market tick and record a portfolio snapshot"
+        >
+          <RefreshCw size={14} />
+          Simulate Tick & Snapshot
+        </button>
+      </div>
+
+      <div className="d21-portfolio-analytics-grid">
+        {/* Card 1: HHI Diversification Score */}
+        <div className="d21-portfolio-analytics-card">
+          <div>
+            <div className="d21-portfolio-card-header">
+              <div className="d21-portfolio-card-title">
+                <Scale size={16} color="var(--primary)" />
+                Diversification (HHI)
               </div>
-              <div className="portfolio-risk-subtitle">winning / losing positions</div>
+              <span className={`d21-portfolio-badge ${hhiAnalysis.badgeClass}`}>
+                {hhiAnalysis.level}
+              </span>
             </div>
-            <div className="card portfolio-risk-card">
-              <div className="portfolio-risk-label">Concentration</div>
-              <div className="portfolio-risk-value">
-                <span className={`concentration-badge concentration-${riskSnapshot.concentration.toLowerCase()}`}>
-                  {riskSnapshot.concentration}
+
+            <div className="d21-portfolio-score-wrap">
+              <div className="d21-portfolio-score-main">
+                <span className="d21-portfolio-score-val" style={{ color: hhiAnalysis.color }}>
+                  {hhiAnalysis.score.toLocaleString('en-IN')}
                 </span>
+                <span className="d21-portfolio-score-sub">/ 10,000</span>
               </div>
-              <div className="portfolio-risk-subtitle">
-                {riskSnapshot.concentration === 'Low'
-                  ? 'Well diversified'
-                  : riskSnapshot.concentration === 'Moderate'
-                    ? 'Moderate concentration risk'
-                    : 'High concentration risk'}
+            </div>
+
+            <div className="d21-portfolio-hhi-bar-container">
+              <div className="d21-portfolio-hhi-bar">
+                <div className="d21-portfolio-hhi-seg d21-hhi-seg-low" style={{ width: '15%' }} title="0–1,500: Diversified" />
+                <div className="d21-portfolio-hhi-seg d21-hhi-seg-mid" style={{ width: '10%' }} title="1,500–2,500: Moderate" />
+                <div className="d21-portfolio-hhi-seg d21-hhi-seg-high" style={{ width: '75%' }} title="2,500–10,000: Concentrated" />
+                {hhiAnalysis.score > 0 && (
+                  <div
+                    className="d21-portfolio-hhi-marker"
+                    style={{ left: `${Math.min(99, Math.max(1, (hhiAnalysis.score / 10000) * 100))}%` }}
+                    title={`Current HHI: ${hhiAnalysis.score}`}
+                  />
+                )}
+              </div>
+              <div className="d21-portfolio-hhi-labels">
+                <span>0 (Max Div)</span>
+                <span>1,500</span>
+                <span>2,500</span>
+                <span>10,000 (Solo)</span>
               </div>
             </div>
           </div>
-        </>
+
+          <div className="d21-portfolio-card-desc">
+            {hhiAnalysis.description}
+          </div>
+        </div>
+
+        {/* Card 2: Cash Allocation */}
+        <div className="d21-portfolio-analytics-card">
+          <div>
+            <div className="d21-portfolio-card-header">
+              <div className="d21-portfolio-card-title">
+                <Wallet size={16} color="var(--success)" />
+                Cash Allocation
+              </div>
+              <span className="d21-portfolio-badge d21-portfolio-badge-primary">
+                {cashAllocation.stance}
+              </span>
+            </div>
+
+            <div className="d21-portfolio-score-wrap">
+              <div className="d21-portfolio-score-main">
+                <span className="d21-portfolio-score-val text-success">
+                  {cashAllocation.cashPercent.toFixed(1)}%
+                </span>
+                <span className="d21-portfolio-score-sub">cash buffer</span>
+              </div>
+            </div>
+
+            <div className="d21-portfolio-split-bar">
+              <div
+                className="d21-portfolio-split-cash"
+                style={{ width: `${cashAllocation.cashPercent}%` }}
+                title={`Cash: ${formatCurrency(cashAllocation.cashBalance)} (${cashAllocation.cashPercent.toFixed(1)}%)`}
+              />
+              <div
+                className="d21-portfolio-split-equity"
+                style={{ width: `${cashAllocation.investedPercent}%` }}
+                title={`Equity: ${formatCurrency(cashAllocation.investedValue)} (${cashAllocation.investedPercent.toFixed(1)}%)`}
+              />
+            </div>
+            <div className="d21-portfolio-split-legend">
+              <span className="d21-portfolio-split-item">
+                <span className="d21-portfolio-split-dot" style={{ backgroundColor: '#10b981' }} />
+                Cash: {formatCurrency(cashAllocation.cashBalance)}
+              </span>
+              <span className="d21-portfolio-split-item">
+                <span className="d21-portfolio-split-dot" style={{ backgroundColor: '#6366f1' }} />
+                Equity: {formatCurrency(cashAllocation.investedValue)}
+              </span>
+            </div>
+          </div>
+
+          <div className="d21-portfolio-card-desc">
+            {cashAllocation.description}
+          </div>
+        </div>
+
+        {/* Card 3: Position Health & Win Rate */}
+        <div className="d21-portfolio-analytics-card">
+          <div>
+            <div className="d21-portfolio-card-header">
+              <div className="d21-portfolio-card-title">
+                <Target size={16} color="#38bdf8" />
+                Holdings Health
+              </div>
+              <span className="d21-portfolio-badge d21-portfolio-badge-success">
+                {holdingsHealth.total > 0 ? `${holdingsHealth.winRate.toFixed(0)}% Profitable` : 'No Holdings'}
+              </span>
+            </div>
+
+            <div className="d21-portfolio-health-stats">
+              <div className="d21-portfolio-health-stat">
+                <div className="d21-portfolio-health-label text-success">
+                  <CheckCircle2 size={12} />
+                  Profitable
+                </div>
+                <div className="d21-portfolio-health-val text-success">
+                  {holdingsHealth.gainers}
+                </div>
+              </div>
+              <div className="d21-portfolio-health-stat">
+                <div className="d21-portfolio-health-label text-danger">
+                  <XCircle size={12} />
+                  Losing
+                </div>
+                <div className="d21-portfolio-health-val text-danger">
+                  {holdingsHealth.losers}
+                </div>
+              </div>
+              <div className="d21-portfolio-health-stat">
+                <div className="d21-portfolio-health-label text-muted">
+                  <MinusCircle size={12} />
+                  Break-even
+                </div>
+                <div className="d21-portfolio-health-val text-muted">
+                  {holdingsHealth.breakeven}
+                </div>
+              </div>
+            </div>
+
+            {holdingsHealth.total > 0 && (
+              <div className="d21-portfolio-health-bar">
+                <div
+                  className="d21-portfolio-health-seg-gain"
+                  style={{ width: `${(holdingsHealth.gainers / holdingsHealth.total) * 100}%` }}
+                />
+                <div
+                  className="d21-portfolio-health-seg-lose"
+                  style={{ width: `${(holdingsHealth.losers / holdingsHealth.total) * 100}%` }}
+                />
+                <div
+                  className="d21-portfolio-health-seg-even"
+                  style={{ width: `${(holdingsHealth.breakeven / holdingsHealth.total) * 100}%` }}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="d21-portfolio-card-desc">
+            {holdingsHealth.total > 0
+              ? `Unrealized gains: +${formatCurrency(holdingsHealth.totalUnrealizedGains)} across ${holdingsHealth.gainers} winning positions vs -${formatCurrency(holdingsHealth.totalUnrealizedLosses)} in paper losses.`
+              : 'Open paper trading positions to monitor unrealized gains, losses, and position win rate.'}
+          </div>
+        </div>
+
+        {/* Card 4: Sector Concentration Insights */}
+        <div className="d21-portfolio-analytics-card">
+          <div>
+            <div className="d21-portfolio-card-header">
+              <div className="d21-portfolio-card-title">
+                <PieChart size={16} color="#f59e0b" />
+                Sector Concentration
+              </div>
+              <span className={`d21-portfolio-badge ${sectorInsights.badgeClass}`}>
+                {sectorInsights.concentrationLevel}
+              </span>
+            </div>
+
+            <div className="d21-portfolio-score-wrap">
+              <div className="d21-portfolio-score-main">
+                <span className="d21-portfolio-score-val" style={{ color: sectorInsights.topSector ? 'var(--text-main)' : 'var(--text-muted)' }}>
+                  {sectorInsights.topSector ? `${sectorInsights.topSector.percent.toFixed(1)}%` : '—'}
+                </span>
+                <span className="d21-portfolio-score-sub">
+                  {sectorInsights.topSector ? `in ${sectorInsights.topSector.name}` : 'no sectors'}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '8px' }}>
+              Representing <strong>{sectorInsights.sectorCount}</strong> distinct sector{sectorInsights.sectorCount === 1 ? '' : 's'}
+            </div>
+          </div>
+
+          <div className="d21-portfolio-card-desc">
+            {sectorInsights.description}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Existing Risk Snapshot Summary (when holdings exist) ── */}
+      {riskSnapshot && (
+        <div className="portfolio-risk-grid" style={{ marginBottom: '32px' }}>
+          <div className="card portfolio-risk-card">
+            <div className="portfolio-risk-label">Holdings Count</div>
+            <div className="portfolio-risk-value">{riskSnapshot.holdingsCount}</div>
+            <div className="portfolio-risk-subtitle">positions in book</div>
+          </div>
+          <div className="card portfolio-risk-card">
+            <div className="portfolio-risk-label">Largest Position</div>
+            <div className="portfolio-risk-value">{riskSnapshot.largestPositionPct.toFixed(1)}%</div>
+            <div className="portfolio-risk-subtitle">of total market value</div>
+          </div>
+          <div className="card portfolio-risk-card">
+            <div className="portfolio-risk-label">Gainers / Losers</div>
+            <div className="portfolio-risk-value">
+              <span className="text-success">{riskSnapshot.gainers}</span>
+              {' / '}
+              <span className="text-danger">{riskSnapshot.losers}</span>
+            </div>
+            <div className="portfolio-risk-subtitle">winning / losing positions</div>
+          </div>
+          <div className="card portfolio-risk-card">
+            <div className="portfolio-risk-label">Concentration Risk</div>
+            <div className="portfolio-risk-value">
+              <span className={`concentration-badge concentration-${riskSnapshot.concentration.toLowerCase()}`}>
+                {riskSnapshot.concentration}
+              </span>
+            </div>
+            <div className="portfolio-risk-subtitle">
+              {riskSnapshot.concentration === 'Low'
+                ? 'Well diversified'
+                : riskSnapshot.concentration === 'Moderate'
+                  ? 'Moderate concentration risk'
+                  : 'High concentration risk'}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Holdings Table ── */}
@@ -828,90 +1319,215 @@ const Portfolio = () => {
         </>
       )}
 
-      {/* ── Performance Visualization ── */}
-      {(trades.length > 0 || holdingsWithAllocation.length > 0) && (
-        <>
-          <h2 className="portfolio-section-title">
-            <Zap size={18} />
-            Performance Visualization
-          </h2>
-          <div className="portfolio-chart-grid">
-            {/* Portfolio Value Over Time (derived from trade history) */}
-            {portfolioValueHistory.length > 0 && (
-              <div className="card">
-                <div className="card-title">Portfolio Value Over Time (Derived)</div>
-                <div className="derived-note">
-                  Built only from trade history (cash + cost-basis). NOT real market history — market price changes are not included.
-                </div>
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={portfolioValueHistory}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                    <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                    <YAxis
-                      tick={{ fill: '#94a3b8', fontSize: 11 }}
-                      tickFormatter={((v: number) => {
-                        if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
-                        if (v >= 100000) return `₹${(v / 100000).toFixed(0)}L`;
-                        return `₹${(v / 1000).toFixed(0)}K`;
-                      }) as any}
-                    />
-                    <RechartsTooltip
-                      contentStyle={{
-                        backgroundColor: 'var(--panel-bg)',
-                        border: '1px solid var(--border)',
-                        borderRadius: '8px',
-                        color: 'var(--text-main)'
-                      }}
-                      formatter={((value: number) => [formatCurrency(value), '']) as any}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="cash"
-                      stackId="1"
-                      stroke="#3b82f6"
-                      fill="#3b82f6"
-                      fillOpacity={0.3}
-                      name="Cash"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="costBasis"
-                      stackId="1"
-                      stroke="#10b981"
-                      fill="#10b981"
-                      fillOpacity={0.3}
-                      name="Cost Basis"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+      {/* ── Day 21: Performance History & Valuation Visualization ── */}
+      <h2 className="portfolio-section-title">
+        <Zap size={18} />
+        Performance History & Valuation
+      </h2>
 
-            {/* Position P&L Bar Chart */}
-            {positionPnlData.length > 0 && (
-              <div className="card">
-                <div className="card-title">Position P&L</div>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={positionPnlData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                    <XAxis dataKey="symbol" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                    <YAxis
-                      tick={{ fill: '#94a3b8', fontSize: 11 }}
-                      tickFormatter={((v: number) => `₹${(v / 1000).toFixed(0)}K`) as any}
-                    />
-                    <RechartsTooltip content={barTooltipContent} />
-                    <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} />
-                    <Bar dataKey="unrealizedPnL" radius={[4, 4, 0, 0]}>
-                      {positionPnlData.map((entry) => (
-                        <Cell key={entry.symbol} fill={entry.unrealizedPnL >= 0 ? '#10b981' : '#ef4444'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+      <div className="card d21-portfolio-perf-card">
+        <div className="d21-portfolio-perf-header">
+          <div>
+            <div className="card-title" style={{ marginBottom: 4 }}>
+              {perfChartTab === 'snapshots'
+                ? 'Simulated Portfolio Valuation History (Recorded Snapshots)'
+                : 'Portfolio Value Over Time (Trade-Derived)'}
+            </div>
+            <div className="card-subtitle text-muted">
+              {perfChartTab === 'snapshots'
+                ? 'Chronological record of portfolio valuation captured during simulated market ticks.'
+                : 'Built only from trade history (cash + cost-basis). Market price changes are not included.'}
+            </div>
           </div>
-        </>
+
+          <div className="d21-portfolio-tab-group">
+            <button
+              className={`d21-portfolio-tab-btn ${perfChartTab === 'snapshots' ? 'd21-portfolio-tab-active' : ''}`}
+              onClick={() => setPerfChartTab('snapshots')}
+            >
+              <History size={14} />
+              Recorded Snapshots ({snapshotChartData.length})
+            </button>
+            <button
+              className={`d21-portfolio-tab-btn ${perfChartTab === 'derived' ? 'd21-portfolio-tab-active' : ''}`}
+              onClick={() => setPerfChartTab('derived')}
+            >
+              <BarChart3 size={14} />
+              Trade Cost Basis ({trades.length})
+            </button>
+          </div>
+        </div>
+
+        {perfChartTab === 'snapshots' ? (
+          snapshotChartData.length === 0 ? (
+            <div className="d21-portfolio-empty-history">
+              <History size={48} className="d21-portfolio-empty-icon" />
+              <h3 className="d21-portfolio-empty-title">No Performance Snapshots Recorded Yet</h3>
+              <p className="d21-portfolio-empty-desc">
+                TradeLab captures performance snapshots during simulated market ticks. Click below or turn on auto-simulation in Settings to build your valuation timeline.
+              </p>
+              <button
+                className="btn btn-primary"
+                onClick={() => simulateTick()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 8 }}
+              >
+                <RefreshCw size={14} />
+                Record First Snapshot
+              </button>
+            </div>
+          ) : (
+            <>
+              {snapshotStats && (
+                <div className="d21-portfolio-snapshot-summary">
+                  <div className="d21-portfolio-stat-pill">
+                    <span className="d21-portfolio-stat-pill-label">Latest Valuation</span>
+                    <span className="d21-portfolio-stat-pill-val">{formatCurrency(snapshotStats.latestValue)}</span>
+                  </div>
+                  <div className="d21-portfolio-stat-pill">
+                    <span className="d21-portfolio-stat-pill-label">Peak Valuation</span>
+                    <span className="d21-portfolio-stat-pill-val text-success">{formatCurrency(snapshotStats.maxVal)}</span>
+                  </div>
+                  <div className="d21-portfolio-stat-pill">
+                    <span className="d21-portfolio-stat-pill-label">Trough Valuation</span>
+                    <span className="d21-portfolio-stat-pill-val text-danger">{formatCurrency(snapshotStats.minVal)}</span>
+                  </div>
+                  <div className="d21-portfolio-stat-pill">
+                    <span className="d21-portfolio-stat-pill-label">Net Snapshot Change</span>
+                    <span className={`d21-portfolio-stat-pill-val ${snapshotStats.netChange >= 0 ? 'text-success' : 'text-danger'}`}>
+                      {formatSignedCurrency(snapshotStats.netChange)} ({formatPercent(snapshotStats.netChangePct)})
+                    </span>
+                  </div>
+                  <div className="d21-portfolio-stat-pill">
+                    <span className="d21-portfolio-stat-pill-label">Snapshots Captured</span>
+                    <span className="d21-portfolio-stat-pill-val">{snapshotStats.count} records</span>
+                  </div>
+                </div>
+              )}
+
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={snapshotChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="d21SnapshotGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis
+                    dataKey="shortLabel"
+                    tick={{ fill: '#94a3b8', fontSize: 11 }}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fill: '#94a3b8', fontSize: 11 }}
+                    domain={['auto', 'auto']}
+                    tickFormatter={((v: number) => {
+                      if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
+                      if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
+                      return `₹${(v / 1000).toFixed(0)}K`;
+                    }) as any}
+                  />
+                  <RechartsTooltip content={snapshotTooltipContent} />
+                  <Area
+                    type="monotone"
+                    dataKey="totalValue"
+                    stroke="#6366f1"
+                    strokeWidth={2}
+                    fill="url(#d21SnapshotGrad)"
+                    dot={{ r: snapshotChartData.length === 1 ? 5 : 2, fill: '#6366f1' }}
+                    activeDot={{ r: 6, fill: '#818cf8' }}
+                    name="Total Portfolio Value"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+
+              <div className="d21-portfolio-card-desc" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 14 }}>
+                <Info size={14} color="#818cf8" />
+                <span>
+                  <strong>Locally Recorded Simulated Performance:</strong> Values represent your virtual portfolio valuation recorded at simulated market ticks. This does not represent real-world historical market performance.
+                </span>
+              </div>
+            </>
+          )
+        ) : (
+          /* Derived Trade History Chart */
+          portfolioValueHistory.length > 0 ? (
+            <>
+              <div className="derived-note" style={{ marginBottom: 12 }}>
+                Built only from trade history (cash + cost-basis). NOT real market history — market price changes are not included.
+              </div>
+              <ResponsiveContainer width="100%" height={280}>
+                <AreaChart data={portfolioValueHistory}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis
+                    tick={{ fill: '#94a3b8', fontSize: 11 }}
+                    tickFormatter={((v: number) => {
+                      if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
+                      if (v >= 100000) return `₹${(v / 100000).toFixed(0)}L`;
+                      return `₹${(v / 1000).toFixed(0)}K`;
+                    }) as any}
+                  />
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: 'var(--panel-bg)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      color: 'var(--text-main)'
+                    }}
+                    formatter={((value: number) => [formatCurrency(value), '']) as any}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="cash"
+                    stackId="1"
+                    stroke="#3b82f6"
+                    fill="#3b82f6"
+                    fillOpacity={0.3}
+                    name="Cash"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="costBasis"
+                    stackId="1"
+                    stroke="#10b981"
+                    fill="#10b981"
+                    fillOpacity={0.3}
+                    name="Cost Basis"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </>
+          ) : (
+            <div className="empty-state" style={{ padding: '32px 16px' }}>
+              <p>No trade execution history yet. Place orders to populate cash & cost basis history.</p>
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Position P&L Bar Chart (when holdings exist) */}
+      {positionPnlData.length > 0 && (
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-title">Position P&L (Unrealized)</div>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={positionPnlData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+              <XAxis dataKey="symbol" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <YAxis
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={((v: number) => `₹${(v / 1000).toFixed(0)}K`) as any}
+              />
+              <RechartsTooltip content={barTooltipContent} />
+              <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} />
+              <Bar dataKey="unrealizedPnL" radius={[4, 4, 0, 0]}>
+                {positionPnlData.map((entry) => (
+                  <Cell key={entry.symbol} fill={entry.unrealizedPnL >= 0 ? '#10b981' : '#ef4444'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       )}
 
       {/* ── Paper Trading Notice ── */}
