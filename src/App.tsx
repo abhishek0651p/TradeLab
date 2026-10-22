@@ -8,6 +8,7 @@ import Watchlist from './pages/Watchlist';
 import Portfolio from './pages/Portfolio';
 import Settings from './pages/Settings';
 import StockDetail from './pages/StockDetail';
+import Screener from './pages/Screener';
 import Orders from './pages/Orders';
 import TradeHistory from './pages/TradeHistory';
 import Risk from './pages/Risk';
@@ -28,6 +29,7 @@ function App() {
               <Route path="/orders" element={<Orders />} />
               <Route path="/trades" element={<TradeHistory />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/screener" element={<Screener />} />
               <Route path="/stock/:symbol" element={<StockDetail />} />
             </Routes>
           </main>

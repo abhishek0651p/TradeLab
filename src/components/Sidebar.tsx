@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LineChart, Star, Briefcase, Settings, Clock, Activity, Brain, History, Shield, Bell } from 'lucide-react';
+import { LayoutDashboard, LineChart, Star, Briefcase, Settings, Clock, Activity, Brain, History, Shield, Bell, Search } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 import NotificationCenter from './NotificationCenter';
 
@@ -38,6 +38,9 @@ const Sidebar = () => {
         </NavLink>
         <NavLink to="/markets" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <LineChart size={20} /> Markets
+        </NavLink>
+        <NavLink to="/screener" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <Search size={20} /> Screener
         </NavLink>
         <NavLink to="/watchlist" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <Star size={20} /> Watchlist
