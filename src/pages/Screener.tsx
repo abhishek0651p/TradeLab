@@ -619,7 +619,7 @@ const Screener: React.FC = () => {
           <table className="d22-screener-table">
             <thead>
               <tr>
-                <th className="d22-screener-col-symbol">#</th>
+
                 <th className="d22-screener-col-symbol">
                   <SortableHeader
                     field="symbol"
@@ -732,7 +732,7 @@ const Screener: React.FC = () => {
                     </td>
                     <td className="d22-screener-col-rsi">
                       {stock.rsiCurrent !== null
-                        ? formatPercent(stock.rsiCurrent / 100)
+                        ? stock.rsiCurrent.toFixed(2)
                         : '—'}
                       <div>
                         {stock.rsiState === 'oversold' ? (
