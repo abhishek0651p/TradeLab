@@ -290,8 +290,8 @@ const Watchlist: React.FC = () => {
   };
 
   // Sparkline component
-  const Sparkline: React.FC<{ symbol: string }> = ({ symbol }) => {
-    const chartData = useMemo(() => generateChartData(symbol, '1D'), [symbol]);
+  const Sparkline: React.FC<{ symbol: string; price?: number }> = ({ symbol, price }) => {
+    const chartData = useMemo(() => generateChartData(symbol, '1D', price), [symbol, price]);
 
     const isPositive = chartData.length > 0 && chartData[chartData.length - 1].price >= chartData[0].price;
     const color = isPositive ? '#10b981' : '#ef4444';
@@ -415,7 +415,7 @@ const Watchlist: React.FC = () => {
                       {stock.sector || <span style={{ color: 'var(--text-muted)' }}>&mdash;</span>}
                     </td>
                     <td className="d18-wl-table-sparkline">
-                      <Sparkline symbol={stock.symbol} />
+                      <Sparkline symbol={stock.symbol} price={stock.price} />
                     </td>
                     <td className="d18-wl-table-actions">
                       <div className="d18-wl-table-actions-row">
@@ -486,7 +486,7 @@ const Watchlist: React.FC = () => {
                   </div>
 
                   <div className="d18-wl-grid-sparkline">
-                    <Sparkline symbol={stock.symbol} />
+                    <Sparkline symbol={stock.symbol} price={stock.price} />
                   </div>
 
                   <div className="d18-wl-grid-sector">

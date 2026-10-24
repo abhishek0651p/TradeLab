@@ -156,3 +156,19 @@ export interface PortfolioSnapshot {
   totalReturnPercent: number;
 }
 
+// Day 23: Market Simulation types
+export type SimulationSpeed = '0.5x' | '1x' | '2x' | '5x';
+
+export interface SimulationSpeedPreset {
+  speed: SimulationSpeed;
+  label: string;
+  intervalSec: number;
+}
+
+export const SIMULATION_SPEED_PRESETS: SimulationSpeedPreset[] = [
+  { speed: '0.5x', label: '0.5x (10s)', intervalSec: 10 },
+  { speed: '1x', label: '1x (5s)', intervalSec: 5 },
+  { speed: '2x', label: '2x (2s)', intervalSec: 2 },
+  { speed: '5x', label: '5x (1s)', intervalSec: 1 },
+];
+

@@ -7524,3 +7524,267 @@ tr:hover td {
     flex-direction: column;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DAY 23: Market Data & Simulation Engine Styles
+   ═══════════════════════════════════════════════════════════════════ */
+
+.d23-market-sim-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(30, 41, 59, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 18px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: border-color 0.2s ease;
+}
+
+.d23-market-sim-bar:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.d23-market-sim-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.d23-sim-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.d23-sim-badge-icon {
+  color: #93c5fd;
+}
+
+.d23-sim-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.d23-sim-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.d23-sim-dot-active {
+  background: #10b981;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: d23-pulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.d23-sim-dot-paused {
+  background: #f59e0b;
+}
+
+@keyframes d23-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.d23-sim-status-text {
+  color: var(--text-main);
+}
+
+.d23-sim-tick-count {
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.d23-sim-interval-pill {
+  font-size: 0.72rem;
+  background: rgba(59, 130, 246, 0.1);
+  color: #93c5fd;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 600;
+}
+
+.d23-market-sim-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.d23-sim-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.d23-sim-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.d23-sim-btn:active {
+  transform: translateY(1px);
+}
+
+.d23-sim-play-btn {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.d23-sim-play-btn.d23-sim-btn-active {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.d23-sim-play-btn:hover {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.d23-sim-play-btn.d23-sim-btn-active:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.d23-sim-speed-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 4px;
+  gap: 2px;
+}
+
+.d23-sim-speed-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  padding: 0 4px;
+  user-select: none;
+}
+
+.d23-sim-speed-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.d23-sim-speed-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.d23-sim-speed-btn.d23-speed-selected {
+  background: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.d23-sim-step-btn {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.d23-sim-step-btn:hover {
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.d23-sim-session-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: default;
+  user-select: none;
+}
+
+@media (max-width: 900px) {
+  .d23-market-sim-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 12px 14px;
+  }
+
+  .d23-market-sim-left {
+    justify-content: space-between;
+  }
+
+  .d23-market-sim-controls {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 580px) {
+  .d23-market-sim-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .d23-sim-speed-group {
+    justify-content: space-between;
+  }
+
+  .d23-sim-session-tag {
+    justify-content: center;
+  }
+}

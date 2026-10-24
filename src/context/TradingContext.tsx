@@ -14,9 +14,19 @@ import {
   Notification,
   NotificationType,
   NotificationPriority,
-  PortfolioSnapshot
+  PortfolioSnapshot,
+  ChartDataPoint,
+  SimulationSpeed,
+  SIMULATION_SPEED_PRESETS
 } from '../types';
-import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS, simulateMarketUpdate } from '../data/mockData';
+import {
+  INITIAL_ACCOUNT_STATE,
+  MOCK_STOCKS,
+  simulateMarketUpdate,
+  updateMarketRegistry,
+  generateInitialStockHistory,
+  appendStockTickHistory
+} from '../data/mockData';
 
 // ──────────────────────────────────────────────
 // Settings model
@@ -24,7 +34,7 @@ import { INITIAL_ACCOUNT_STATE, MOCK_STOCKS, simulateMarketUpdate } from '../dat
 
 export interface TradingSettings {
   autoSimEnabled: boolean;
-  autoSimIntervalSec: number;   // 2–60 seconds
+  autoSimIntervalSec: number;   // 1–60 seconds
   showPnlPercent: boolean;      // show % alongside ₹ values
   notificationsEnabled: boolean; // Day 16: toggle non-critical notifications
 }
@@ -36,7 +46,7 @@ const DEFAULT_SETTINGS: TradingSettings = {
   notificationsEnabled: true
 };
 
-const AUTO_SIM_MIN_SEC = 2;
+const AUTO_SIM_MIN_SEC = 1;
 const AUTO_SIM_MAX_SEC = 60;
 
 const clampInterval = (sec: number): number =>
@@ -54,9 +64,13 @@ interface TradingContextType {
   orders: Order[];
   executions: Execution[];
   stocks: StockData[];
+  stockHistory: Record<string, ChartDataPoint[]>;
   tick: number;
   settings: TradingSettings;
   autoSimActive: boolean;
+  simulationSpeed: SimulationSpeed;
+  toggleSimulation: () => void;
+  setSimulationSpeed: (speed: SimulationSpeed) => void;
   notifications: Notification[];
   unreadNotificationCount: number;
   addToWatchlist: (symbol: string) => void;
@@ -497,6 +511,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [orders, setOrders] = useState<Order[]>(() => safeLoadJSON('tradelab_orders', []));
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
   const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
+  const [stockHistory, setStockHistory] = useState<Record<string, ChartDataPoint[]>>(() => {
+    const saved = safeLoadJSON<Record<string, ChartDataPoint[]>>('tradelab_stock_history', {});
+    if (!saved || Object.keys(saved).length === 0) {
+      return generateInitialStockHistory(MOCK_STOCKS);
+    }
+    return saved;
+  });
   const [tick, setTick] = useState<number>(() => safeLoadJSON<number>('tradelab_tick', 0));
   const [settings, setSettings] = useState<TradingSettings>(() => {
     const saved = safeLoadJSON<TradingSettings>('tradelab_settings', DEFAULT_SETTINGS);
@@ -529,6 +550,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const holdingsRef = useRef(holdings);
   const tradesRef = useRef(trades);
   const stocksRef = useRef(stocks);
+  const stockHistoryRef = useRef(stockHistory);
   const ordersRef = useRef(orders);
   const notificationsRef = useRef(notifications);
   const marketAlertStateRef = useRef(marketAlertState);
@@ -538,9 +560,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
   useEffect(() => { tradesRef.current = trades; }, [trades]);
   useEffect(() => { stocksRef.current = stocks; }, [stocks]);
+  useEffect(() => { stockHistoryRef.current = stockHistory; }, [stockHistory]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
   useEffect(() => { marketAlertStateRef.current = marketAlertState; }, [marketAlertState]);
+
+  // Synchronize market registry with authoritative stocks and history
+  useEffect(() => {
+    updateMarketRegistry(stocks, stockHistory);
+  }, [stocks, stockHistory]);
 
   // Persist to localStorage
   useEffect(() => { localStorage.setItem('tradelab_account', JSON.stringify(account)); }, [account]);
@@ -550,6 +578,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_orders', JSON.stringify(orders)); }, [orders]);
   useEffect(() => { localStorage.setItem('tradelab_executions', JSON.stringify(executions)); }, [executions]);
   useEffect(() => { localStorage.setItem('tradelab_stocks', JSON.stringify(stocks)); }, [stocks]);
+  useEffect(() => { localStorage.setItem('tradelab_stock_history', JSON.stringify(stockHistory)); }, [stockHistory]);
   useEffect(() => { localStorage.setItem('tradelab_tick', JSON.stringify(tick)); }, [tick]);
   useEffect(() => { localStorage.setItem('tradelab_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('tradelab_notifications', JSON.stringify(notifications)); }, [notifications]);
@@ -1155,6 +1184,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setOrders([]);
     setExecutions([]);
     setStocks(MOCK_STOCKS);
+    const initialHistory = generateInitialStockHistory(MOCK_STOCKS);
+    setStockHistory(initialHistory);
+    updateMarketRegistry(MOCK_STOCKS, initialHistory);
     setTick(0);
 
     // Clear notifications and snapshots first, then add reset notification
@@ -1169,6 +1201,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem('tradelab_orders');
     localStorage.removeItem('tradelab_executions');
     localStorage.removeItem('tradelab_stocks');
+    localStorage.removeItem('tradelab_stock_history');
     localStorage.removeItem('tradelab_tick');
     localStorage.removeItem('tradelab_notifications');
     localStorage.removeItem('tradelab_portfolio_snapshots');
@@ -1199,6 +1232,27 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       return next;
     });
+  }, []);
+
+  // ── Simulation controls (Day 23) ──
+
+  const simulationSpeed: SimulationSpeed = React.useMemo(() => {
+    const sec = settings.autoSimIntervalSec;
+    if (sec <= 1) return '5x';
+    if (sec <= 2) return '2x';
+    if (sec <= 5) return '1x';
+    return '0.5x';
+  }, [settings.autoSimIntervalSec]);
+
+  const toggleSimulation = useCallback(() => {
+    setSettings(prev => ({ ...prev, autoSimEnabled: !prev.autoSimEnabled }));
+  }, []);
+
+  const setSimulationSpeed = useCallback((speed: SimulationSpeed) => {
+    const preset = SIMULATION_SPEED_PRESETS.find(p => p.speed === speed);
+    if (preset) {
+      setSettings(prev => ({ ...prev, autoSimIntervalSec: preset.intervalSec }));
+    }
   }, []);
 
   // ── Portfolio Snapshot Recording (Day 21) ──
@@ -1260,6 +1314,14 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     stocksRef.current = updatedStocks;
     setStocks(updatedStocks);
 
+    // Append bounded tick to stock history (max 100 points)
+    const updatedHistory = appendStockTickHistory(stockHistoryRef.current, updatedStocks, 100);
+    stockHistoryRef.current = updatedHistory;
+    setStockHistory(updatedHistory);
+
+    // Keep registry immediately synchronized
+    updateMarketRegistry(updatedStocks, updatedHistory);
+
     // Market alert: notify when a stock crosses the ±5% threshold
     const alertUpdates: Record<string, boolean> = {};
     updatedStocks.forEach(stock => {
@@ -1281,9 +1343,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Record portfolio snapshot reflecting the newly updated prices (Day 21)
     recordPortfolioSnapshot(updatedStocks, nextTick);
+
+    // Process pending orders and GTT triggers against the new prices
+    processPendingOrdersRef.current();
   }, [addNotification, recordPortfolioSnapshot]);
 
-  // ── Auto-simulation interval (Day 15) ──
+  // ── Auto-simulation interval (Day 15 & Day 23) ──
 
   const simulateTickRef = useRef(simulateTick);
   useEffect(() => { simulateTickRef.current = simulateTick; }, [simulateTick]);
@@ -1299,8 +1364,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const intervalMs = settings.autoSimIntervalSec * 1000;
     const id = window.setInterval(() => {
       simulateTickRef.current();
-      // Process pending orders after each auto-tick
-      processPendingOrdersRef.current();
     }, intervalMs);
     return () => {
       window.clearInterval(id);
@@ -1319,9 +1382,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       orders,
       executions,
       stocks,
+      stockHistory,
       tick,
       settings,
       autoSimActive,
+      simulationSpeed,
+      toggleSimulation,
+      setSimulationSpeed,
       notifications,
       unreadNotificationCount,
       addToWatchlist,

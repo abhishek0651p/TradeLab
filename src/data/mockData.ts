@@ -91,23 +91,106 @@ export const simulateMarketUpdate = (stocks: StockData[], tick: number): StockDa
   });
 };
 
-export const generateChartData = (symbol: string, timeframe: '1D' | '1W' | '1M' | '1Y'): ChartDataPoint[] => {
-  const stock = MOCK_STOCKS.find(s => s.symbol === symbol);
-  const basePrice = stock ? stock.price : 1000;
-  
+// In-memory registry keeping active market prices and bounded 1D history
+const activeStockRegistry = new Map<string, StockData>(MOCK_STOCKS.map(s => [s.symbol, s]));
+const activeHistoryRegistry = new Map<string, ChartDataPoint[]>();
+
+/** Synchronize the central market registry with active simulated state */
+export const updateMarketRegistry = (
+  stocks: StockData[],
+  history?: Record<string, ChartDataPoint[]>
+) => {
+  stocks.forEach(s => activeStockRegistry.set(s.symbol, s));
+  if (history) {
+    Object.entries(history).forEach(([sym, pts]) => {
+      activeHistoryRegistry.set(sym, pts);
+    });
+  }
+};
+
+/** Get the authoritative current simulated stock from the central registry */
+export const getRegisteredStock = (symbol: string): StockData | undefined => {
+  return activeStockRegistry.get(symbol);
+};
+
+/** Get the authoritative bounded 1D history from the central registry */
+export const getRegisteredHistory = (symbol: string): ChartDataPoint[] | undefined => {
+  return activeHistoryRegistry.get(symbol);
+};
+
+/** Generate baseline 1D historical series for all stocks */
+export const generateInitialStockHistory = (stocks: StockData[]): Record<string, ChartDataPoint[]> => {
+  const result: Record<string, ChartDataPoint[]> = {};
+  stocks.forEach(stock => {
+    result[stock.symbol] = generateChartData(stock.symbol, '1D', stock.price);
+  });
+  return result;
+};
+
+/** Append a market tick to bounded stock history (max 100 points) */
+export const appendStockTickHistory = (
+  prevHistory: Record<string, ChartDataPoint[]>,
+  updatedStocks: StockData[],
+  maxPoints = 100
+): Record<string, ChartDataPoint[]> => {
+  const nextHistory: Record<string, ChartDataPoint[]> = { ...prevHistory };
+  const nowLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  updatedStocks.forEach(stock => {
+    const existing = nextHistory[stock.symbol] || [];
+    const tickSeed = symbolHash(stock.symbol) + stock.volume;
+    const tickVolume = Math.floor(1000 + seededRandom(tickSeed) * 5000);
+
+    const newPoint: ChartDataPoint = {
+      timestamp: nowLabel,
+      price: stock.price,
+      volume: tickVolume,
+    };
+
+    const combined = [...existing, newPoint];
+    nextHistory[stock.symbol] = combined.length > maxPoints ? combined.slice(-maxPoints) : combined;
+  });
+
+  return nextHistory;
+};
+
+export const generateChartData = (
+  symbol: string,
+  timeframe: '1D' | '1W' | '1M' | '1Y',
+  currentPriceOverride?: number,
+  historyOverride?: ChartDataPoint[]
+): ChartDataPoint[] => {
+  const registeredStock = activeStockRegistry.get(symbol);
+  const fallbackStock = MOCK_STOCKS.find(s => s.symbol === symbol);
+  const stock = registeredStock || fallbackStock;
+
+  const effectivePrice = currentPriceOverride ?? stock?.price ?? 1000;
+  const effectiveChangePercent = stock?.changePercent ?? 0;
+
+  // For 1D timeframe, return recorded live history if available
+  if (timeframe === '1D') {
+    const recordedHistory = historyOverride || activeHistoryRegistry.get(symbol);
+    if (recordedHistory && recordedHistory.length >= 2) {
+      // Ensure the very last point accurately reflects effectivePrice
+      const cloned = recordedHistory.map(pt => ({ ...pt }));
+      cloned[cloned.length - 1].price = effectivePrice;
+      return cloned;
+    }
+  }
+
   const dataPoints: ChartDataPoint[] = [];
-  
+
   // Create a seed based on symbol so it's deterministic per stock
   let seed = 0;
   for (let i = 0; i < symbol.length; i++) {
     seed += symbol.charCodeAt(i);
   }
-  
+
   let pointsCount = 0;
   let intervalMs = 0;
   let volatility = 0;
-  
-  switch(timeframe) {
+
+  switch (timeframe) {
     case '1D':
       pointsCount = 78; // Every 5 mins for 6.5 hours
       intervalMs = 5 * 60 * 1000;
@@ -129,26 +212,26 @@ export const generateChartData = (symbol: string, timeframe: '1D' | '1W' | '1M' 
       volatility = 0.03;
       break;
   }
-  
-  let currentPrice = basePrice * (1 - (timeframe === '1D' ? (stock?.changePercent || 0)/100 : volatility * 5));
+
+  let currentWalkPrice = effectivePrice * (1 - (timeframe === '1D' ? effectiveChangePercent / 100 : volatility * 5));
   const now = new Date();
   const startTime = now.getTime() - (pointsCount * intervalMs);
-  
+
   for (let i = 0; i < pointsCount; i++) {
     // Determine random walk
     const rand = seededRandom(seed + i + timeframe.charCodeAt(0));
-    const change = currentPrice * volatility * (rand - 0.48); // Slight upward bias
-    
-    currentPrice += change;
-    
+    const change = currentWalkPrice * volatility * (rand - 0.48); // Slight upward bias
+
+    currentWalkPrice += change;
+
     // Ensure final point matches current price closely if it's 1D
     if (i === pointsCount - 1 && timeframe === '1D') {
-      currentPrice = basePrice;
+      currentWalkPrice = effectivePrice;
     }
-    
+
     const pointTime = new Date(startTime + (i * intervalMs));
     let timeLabel = '';
-    
+
     if (timeframe === '1D') {
       timeLabel = pointTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } else if (timeframe === '1W' || timeframe === '1M') {
@@ -156,13 +239,18 @@ export const generateChartData = (symbol: string, timeframe: '1D' | '1W' | '1M' 
     } else {
       timeLabel = pointTime.toLocaleDateString([], { month: 'short', year: '2-digit' });
     }
-    
+
     dataPoints.push({
       timestamp: timeLabel,
-      price: Number(currentPrice.toFixed(2)),
+      price: Number(currentWalkPrice.toFixed(2)),
       volume: Math.floor(10000 + seededRandom(seed + i * 2) * 50000)
     });
   }
-  
+
+  // Ensure last point matches current price exactly
+  if (dataPoints.length > 0) {
+    dataPoints[dataPoints.length - 1].price = effectivePrice;
+  }
+
   return dataPoints;
 };

@@ -541,12 +541,19 @@ const StockDetail = () => {
     if (symbol) {
       setIsChartLoading(true);
       const timer = setTimeout(() => {
-        setChartData(isTimeframeSupported ? generateChartData(symbol, timeframe as '1D' | '1W' | '1M' | '1Y') : []);
+        setChartData(isTimeframeSupported ? generateChartData(symbol, timeframe as '1D' | '1W' | '1M' | '1Y', stock?.price) : []);
         setIsChartLoading(false);
       }, 150);
       return () => clearTimeout(timer);
     }
   }, [symbol, timeframe, isTimeframeSupported]);
+
+  // Synchronize chart data on market ticks without flashing loading state
+  useEffect(() => {
+    if (symbol && isTimeframeSupported && stock?.price) {
+      setChartData(generateChartData(symbol, timeframe as '1D' | '1W' | '1M' | '1Y', stock.price));
+    }
+  }, [stock?.price]);
 
   useEffect(() => {
     if (!toast) return;

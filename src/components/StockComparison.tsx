@@ -1,6 +1,5 @@
 import React, { useMemo, memo } from 'react';
 import { X } from 'lucide-react';
-import { MOCK_STOCKS } from '../data/mockData';
 import { generateChartData } from '../data/mockData';
 import { useTrading } from '../context/TradingContext';
 import { calculateEMA, calculateRSI, calculateVolumeStats } from '../analysis/TechnicalIndicators';
@@ -15,7 +14,7 @@ interface Props {
 const MAX_SELECTION = 3;
 
 const StockComparison: React.FC<Props> = memo(({ open, onClose, currentSymbol, formatCurrency }) => {
-  const { holdings } = useTrading();
+  const { holdings, stocks } = useTrading();
   const [selection, setSelection] = React.useState<string[]>([currentSymbol]);
 
   // Reset selection to currentSymbol when opened from a new stock
@@ -36,7 +35,7 @@ const StockComparison: React.FC<Props> = memo(({ open, onClose, currentSymbol, f
 
   const comparisonData = useMemo(() => {
     return selection.map((sym) => {
-      const stock = MOCK_STOCKS.find((s) => s.symbol === sym);
+      const stock = stocks.find((s) => s.symbol === sym);
       if (!stock) return null;
 
       const chartData = generateChartData(sym, '1M');
@@ -94,7 +93,7 @@ const StockComparison: React.FC<Props> = memo(({ open, onClose, currentSymbol, f
 
         {/* Stock selectors */}
         <div className="d18-comparison-selector-row">
-          {MOCK_STOCKS.filter((s) => s.symbol === currentSymbol || !selection.includes(s.symbol)).map((s) => (
+          {stocks.filter((s) => s.symbol === currentSymbol || !selection.includes(s.symbol)).map((s) => (
             <button
               key={s.symbol}
               className={`d18-comparison-chip ${selection.includes(s.symbol) ? 'd18-chip-active' : ''}`}

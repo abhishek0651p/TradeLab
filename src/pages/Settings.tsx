@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useTrading } from '../context/TradingContext';
+import { SIMULATION_SPEED_PRESETS, SimulationSpeed } from '../types';
 import {
   Settings as SettingsIcon,
   RefreshCcw,
@@ -52,7 +53,17 @@ const formatCurrency = (value: number) =>
 /* ── Settings Component ── */
 
 const Settings = () => {
-  const { trades, orders, settings, autoSimActive, tick, resetAccount, updateSettings } = useTrading();
+  const {
+    trades,
+    orders,
+    settings,
+    autoSimActive,
+    simulationSpeed,
+    setSimulationSpeed,
+    tick,
+    resetAccount,
+    updateSettings
+  } = useTrading();
 
   const [resetConfirmStep, setResetConfirmStep] = useState<0 | 1 | 2>(0);
   // 0 = default, 1 = confirm prompt, 2 = success feedback
@@ -195,25 +206,55 @@ const Settings = () => {
             <span className="d15-sim-tick">Tick #{tick}</span>
           </div>
 
+          {/* Speed Presets */}
+          <div className="d15-setting-row">
+            <div className="d15-setting-info">
+              <div className="d15-setting-label">
+                <Timer size={16} /> Simulation Speed
+              </div>
+              <p className="d15-setting-desc">
+                Select a speed preset or fine-tune with the interval slider below.
+              </p>
+            </div>
+            <div className="d23-sim-speed-group" role="group" aria-label="Simulation Speed Presets">
+              {SIMULATION_SPEED_PRESETS.map((preset) => {
+                const isSelected = simulationSpeed === preset.speed;
+                return (
+                  <button
+                    key={preset.speed}
+                    type="button"
+                    className={`d23-sim-speed-btn ${isSelected ? 'd23-speed-selected' : ''}`}
+                    onClick={() => setSimulationSpeed(preset.speed)}
+                    aria-pressed={isSelected}
+                    aria-label={`Set speed to ${preset.label}`}
+                  >
+                    {preset.speed}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Interval setting */}
           <div className="d15-setting-row d15-interval-row">
             <div className="d15-setting-info">
               <div className="d15-setting-label">
-                <Timer size={16} /> Tick Interval
+                Tick Interval
               </div>
               <p className="d15-setting-desc">
-                Seconds between each simulated market update (2–60).
+                Seconds between each simulated market update (1–60).
               </p>
             </div>
             <div className="d15-interval-control">
               <input
                 type="range"
-                min={2}
+                min={1}
                 max={60}
                 step={1}
                 value={settings.autoSimIntervalSec}
                 onChange={handleIntervalChange}
                 className="d15-slider"
+                aria-label="Simulation tick interval in seconds"
               />
               <div className="d15-interval-value">{settings.autoSimIntervalSec}s</div>
             </div>

@@ -12,6 +12,7 @@ import Screener from './pages/Screener';
 import Orders from './pages/Orders';
 import TradeHistory from './pages/TradeHistory';
 import Risk from './pages/Risk';
+import MarketSimulationBar from './components/MarketSimulationBar';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
         <div className="app-container">
           <Sidebar />
           <main className="main-content">
+            <MarketSimulationBar />
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/markets" element={<Markets />} />
