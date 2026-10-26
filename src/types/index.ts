@@ -172,3 +172,44 @@ export const SIMULATION_SPEED_PRESETS: SimulationSpeedPreset[] = [
   { speed: '5x', label: '5x (1s)', intervalSec: 1 },
 ];
 
+// Day 24: Market event log types
+export type MarketEventType =
+  | 'SIM_STARTED'
+  | 'SIM_PAUSED'
+  | 'SIM_RESUMED'
+  | 'SIM_SPEED_CHANGED'
+  | 'MARKET_TICK'
+  | 'REPLAY_STARTED'
+  | 'REPLAY_PAUSED'
+  | 'REPLAY_RESUMED'
+  | 'REPLAY_STOPPED'
+  | 'REPLAY_COMPLETED'
+  | 'INVALID_DATA_REJECTED';
+
+export interface MarketEvent {
+  id: string;
+  type: MarketEventType;
+  message: string;
+  timestamp: number;
+  detail?: string;
+}
+
+// Day 24: Replay types
+export type ReplaySpeed = 1 | 2 | 4 | 8;
+
+export const REPLAY_SPEED_PRESETS: { speed: ReplaySpeed; label: string }[] = [
+  { speed: 1, label: '1×' },
+  { speed: 2, label: '2×' },
+  { speed: 4, label: '4×' },
+  { speed: 8, label: '8×' },
+];
+
+export interface ReplayState {
+  active: boolean;
+  paused: boolean;
+  symbol: string;
+  snapshotData: ChartDataPoint[];
+  currentIndex: number;
+  speed: ReplaySpeed;
+}
+

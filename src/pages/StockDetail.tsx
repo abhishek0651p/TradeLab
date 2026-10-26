@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import { generateChartData } from '../data/mockData';
 import { calculateEMA, calculateRSI, calculateVolumeStats, calculateSupportResistance, computeTechnicalCondition } from '../analysis/TechnicalIndicators';
-import { Star, ArrowLeft, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X, AlertTriangle, GitCompare } from 'lucide-react';
+import { Star, ArrowLeft, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X, AlertTriangle, GitCompare, Play, Pause, Square, FastForward } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Line, Bar } from 'recharts';
-import { ChartDataPoint, Holding, OrderSide, OrderType, StockData, TrailingStopConfig } from '../types';
+import { ChartDataPoint, Holding, OrderSide, OrderType, StockData, TrailingStopConfig, REPLAY_SPEED_PRESETS, ReplaySpeed } from '../types';
 import { computePreOrderRiskSnapshot, PreOrderRiskSnapshot } from '../risk/RiskCalculationModel';
 import TechnicalIndicatorPanel from '../components/TechnicalIndicatorPanel';
 import SupportResistancePanel from '../components/SupportResistancePanel';
@@ -516,7 +516,10 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
 const StockDetail = () => {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
-  const { stocks, watchlist, addToWatchlist, removeFromWatchlist, placeOrder, account, holdings } = useTrading();
+  const {
+    stocks, watchlist, addToWatchlist, removeFromWatchlist, placeOrder, account, holdings,
+    replayState, startReplay, pauseReplay, resumeReplay, stopReplay, setReplaySpeed, stockHistory
+  } = useTrading();
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -537,6 +540,35 @@ const StockDetail = () => {
 
   const isTimeframeSupported = SUPPORTED_TIMEFRAMES.includes(timeframe);
 
+  // Day 24: Stop replay when symbol changes or timeframe changes away from 1D
+  useEffect(() => {
+    if (replayState.active && replayState.symbol !== symbol) {
+      stopReplay();
+    }
+  }, [symbol, replayState.active, replayState.symbol, stopReplay]);
+
+  useEffect(() => {
+    if (replayState.active && timeframe !== '1D') {
+      stopReplay();
+    }
+  }, [timeframe, replayState.active, stopReplay]);
+
+  // Is replay active for the current symbol and 1D timeframe?
+  const isReplayActive = Boolean(replayState.active && replayState.symbol === symbol && timeframe === '1D');
+
+  // Day 24: Compute replay-aware chart data slice
+  const replayChartData = useMemo(() => {
+    if (!isReplayActive) return null;
+    return replayState.snapshotData.slice(0, replayState.currentIndex + 1);
+  }, [isReplayActive, replayState.snapshotData, replayState.currentIndex]);
+
+  // Check if there's enough history for replay
+  const canStartReplay = useMemo(() => {
+    if (!symbol) return false;
+    const history = stockHistory[symbol];
+    return Boolean(history && history.length >= 2);
+  }, [symbol, stockHistory]);
+
   useEffect(() => {
     if (symbol) {
       setIsChartLoading(true);
@@ -549,8 +581,6 @@ const StockDetail = () => {
   }, [symbol, timeframe, isTimeframeSupported]);
 
   // Synchronize chart data on market ticks without flashing loading state
-  // Include timeframe in deps so a timeframe change while simulation is running
-  // immediately refreshes the chart instead of using a stale closure
   useEffect(() => {
     if (symbol && isTimeframeSupported && stock?.price) {
       setChartData(generateChartData(symbol, timeframe as '1D' | '1W' | '1M' | '1Y', stock.price));
@@ -563,23 +593,30 @@ const StockDetail = () => {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Authoritative chart data source: replay slice when replay is active, otherwise live chartData
+  const activeChartData = isReplayActive && replayChartData ? replayChartData : chartData;
+
+  const effectiveCurrentPrice = isReplayActive && replayChartData && replayChartData.length > 0
+    ? replayChartData[replayChartData.length - 1].price
+    : (stock?.price ?? 0);
+
   const chartStats = useMemo(() => {
-    if (chartData.length === 0) return { min: 0, max: 0, avg: 0, change: 0, changePercent: 0 };
-    const prices = chartData.map(d => d.price);
+    if (activeChartData.length === 0) return { min: 0, max: 0, avg: 0, change: 0, changePercent: 0 };
+    const prices = activeChartData.map(d => d.price);
     const min = Math.min(...prices);
     const max = Math.max(...prices);
     const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
     const first = prices[0];
     const last = prices[prices.length - 1];
     const change = last - first;
-    const changePercent = (change / first) * 100;
+    const changePercent = first > 0 ? (change / first) * 100 : 0;
     return { min, max, avg, change, changePercent };
-  }, [chartData]);
+  }, [activeChartData]);
 
   const indicators = useMemo(() => {
-    if (chartData.length === 0) return null;
-    const prices = chartData.map(d => d.price);
-    const volumes = chartData.map(d => d.volume);
+    if (activeChartData.length === 0) return null;
+    const prices = activeChartData.map(d => d.price);
+    const volumes = activeChartData.map(d => d.volume);
 
     const ema20 = calculateEMA(prices, 20);
     const ema50 = calculateEMA(prices, 50);
@@ -587,23 +624,40 @@ const StockDetail = () => {
     const volStats = calculateVolumeStats(volumes);
 
     return { ema20, ema50, rsi, volStats };
-  }, [chartData]);
+  }, [activeChartData]);
 
   const ema20Last = indicators?.ema20.values[indicators.ema20.values.length - 1] ?? null;
   const ema50Last = indicators?.ema50.values[indicators.ema50.values.length - 1] ?? null;
   const rsiCurrent = indicators?.rsi.current ?? null;
 
+  const extendedChartData = useMemo(() => {
+    if (!indicators) return activeChartData;
+    return activeChartData.map((d, i) => ({
+      ...d,
+      ema20: indicators.ema20.values[i] ?? null,
+      ema50: indicators.ema50.values[i] ?? null,
+    }));
+  }, [activeChartData, indicators]);
+
+  const rsiChartData = useMemo(() => {
+    if (!indicators) return [];
+    return indicators.rsi.values.map((v, i) => ({
+      timestamp: activeChartData[i]?.timestamp ?? '',
+      rsi: v,
+    })).filter(d => d.rsi !== null);
+  }, [indicators, activeChartData]);
+
   const srResult = useMemo(() => {
-    if (chartData.length === 0) return { supports: [], resistances: [], nearestSupport: null, nearestResistance: null };
-    const prices = chartData.map(d => d.price);
-    return calculateSupportResistance(prices, stock?.price ?? 0);
-  }, [chartData, stock?.price]);
+    if (activeChartData.length === 0) return { supports: [], resistances: [], nearestSupport: null, nearestResistance: null };
+    const prices = activeChartData.map(d => d.price);
+    return calculateSupportResistance(prices, effectiveCurrentPrice);
+  }, [activeChartData, effectiveCurrentPrice]);
 
   const technicalCondition = useMemo(() => {
     return computeTechnicalCondition(
       ema20Last,
       ema50Last,
-      stock?.price ?? 0,
+      effectiveCurrentPrice,
       indicators?.rsi
         ? { current: indicators.rsi.current, state: indicators.rsi.state }
         : null,
@@ -613,7 +667,7 @@ const StockDetail = () => {
         nearestResistance: srResult.nearestResistance?.price ?? null,
       }
     );
-  }, [ema20Last, ema50Last, stock?.price, indicators?.rsi, indicators?.volStats, srResult]);
+  }, [ema20Last, ema50Last, effectiveCurrentPrice, indicators?.rsi, indicators?.volStats, srResult]);
 
   if (!stock) {
     return (
@@ -699,23 +753,6 @@ const StockDetail = () => {
     }
   };
 
-  const extendedChartData = useMemo(() => {
-    if (!indicators) return chartData;
-    return chartData.map((d, i) => ({
-      ...d,
-      ema20: indicators.ema20.values[i] ?? null,
-      ema50: indicators.ema50.values[i] ?? null,
-    }));
-  }, [chartData, indicators]);
-
-  const rsiChartData = useMemo(() => {
-    if (!indicators) return [];
-    return indicators.rsi.values.map((v, i) => ({
-      timestamp: chartData[i]?.timestamp ?? '',
-      rsi: v,
-    })).filter(d => d.rsi !== null);
-  }, [indicators, chartData]);
-
   return (
     <div className="stock-detail-page">
       {toast && (
@@ -781,6 +818,17 @@ const StockDetail = () => {
                 </span>
               </div>
             </div>
+
+            {/* Day 24: Replay Banner */}
+            {isReplayActive && (
+              <div className="d24-replay-banner">
+                <div className="d24-replay-banner-dot" />
+                <span>HISTORICAL REPLAY — READ ONLY</span>
+                <span className="d24-replay-banner-pos">
+                  {replayState.currentIndex + 1} / {replayState.snapshotData.length}
+                </span>
+              </div>
+            )}
 
             {!isTimeframeSupported ? (
               <div className="d18-no-data-notice">
@@ -978,6 +1026,120 @@ const StockDetail = () => {
                   </button>
                 );
               })}
+            </div>
+
+            {/* Day 24: Historical Replay Controls */}
+            <div className="d24-replay-panel">
+              <div className="d24-replay-header">
+                <div className="d24-replay-title">
+                  <Activity size={14} />
+                  <span>Historical Replay</span>
+                </div>
+                {isReplayActive && (
+                  <span className={`d24-replay-status-badge ${replayState.paused ? 'paused' : 'playing'}`}>
+                    {replayState.paused ? 'PAUSED' : 'REPLAYING'}
+                  </span>
+                )}
+              </div>
+
+              {timeframe !== '1D' ? (
+                <div className="d24-replay-notice">
+                  <span>Replay is available on the 1D timeframe. Switch to 1D to replay recorded session candles.</span>
+                </div>
+              ) : !canStartReplay ? (
+                <div className="d24-replay-notice">
+                  <span>Insufficient history recorded for replay (minimum 2 ticks required). Keep simulation active to record history.</span>
+                </div>
+              ) : (
+                <div className="d24-replay-body">
+                  <div className="d24-replay-btn-group">
+                    {!isReplayActive ? (
+                      <button
+                        type="button"
+                        className="btn btn-primary d24-replay-btn"
+                        onClick={() => symbol && startReplay(symbol)}
+                        title="Start replaying recorded history from the beginning"
+                      >
+                        <Play size={13} />
+                        <span>Start Replay</span>
+                      </button>
+                    ) : (
+                      <>
+                        {replayState.paused ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary d24-replay-btn"
+                            onClick={resumeReplay}
+                            title="Resume historical replay"
+                          >
+                            <Play size={13} />
+                            <span>Resume</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-secondary d24-replay-btn"
+                            onClick={pauseReplay}
+                            title="Pause historical replay"
+                          >
+                            <Pause size={13} />
+                            <span>Pause</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-outline d24-replay-btn"
+                          onClick={stopReplay}
+                          title="Stop replay and return to live market view"
+                        >
+                          <Square size={13} />
+                          <span>Stop</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {isReplayActive && (
+                    <div className="d24-replay-speed-group">
+                      <span className="d24-replay-label">Speed:</span>
+                      {REPLAY_SPEED_PRESETS.map((preset) => (
+                        <button
+                          key={preset.speed}
+                          type="button"
+                          className={`d24-replay-speed-btn ${replayState.speed === preset.speed ? 'active' : ''}`}
+                          onClick={() => setReplaySpeed(preset.speed)}
+                          title={`Replay speed ${preset.label}`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {isReplayActive && (
+                    <div className="d24-replay-progress-container">
+                      <div className="d24-replay-progress-bar">
+                        <div
+                          className="d24-replay-progress-fill"
+                          style={{
+                            width: `${((replayState.currentIndex + 1) / Math.max(1, replayState.snapshotData.length)) * 100}%`
+                          }}
+                        />
+                      </div>
+                      <div className="d24-replay-progress-info">
+                        <span className="d24-replay-pos">
+                          Point {replayState.currentIndex + 1} of {replayState.snapshotData.length}
+                        </span>
+                        {replayChartData && replayChartData[replayState.currentIndex] && (
+                          <span className="d24-replay-point-detail">
+                            {replayChartData[replayState.currentIndex].timestamp} · {formatCurrency(replayChartData[replayState.currentIndex].price)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

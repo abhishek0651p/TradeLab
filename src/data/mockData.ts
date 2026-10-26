@@ -100,23 +100,148 @@ export const updateMarketRegistry = (
   stocks: StockData[],
   history?: Record<string, ChartDataPoint[]>
 ) => {
-  stocks.forEach(s => activeStockRegistry.set(s.symbol, s));
-  if (history) {
-    Object.entries(history).forEach(([sym, pts]) => {
-      activeHistoryRegistry.set(sym, pts);
+  stocks.forEach(s => activeStockRegistry.set(s.symbol, { ...s }));
+  if (history && typeof history === 'object' && !Array.isArray(history)) {
+    const sanitized = sanitizeStockHistory(history);
+    Object.entries(sanitized).forEach(([sym, pts]) => {
+      // Do not overwrite existing valid history with empty/all-rejected points
+      if (pts.length > 0) {
+        activeHistoryRegistry.set(sym, pts);
+      }
     });
   }
 };
 
-/** Get the authoritative current simulated stock from the central registry */
+/** Get the authoritative current simulated stock from the central registry (defensive copy) */
 export const getRegisteredStock = (symbol: string): StockData | undefined => {
-  return activeStockRegistry.get(symbol);
+  const stock = activeStockRegistry.get(symbol);
+  return stock ? { ...stock } : undefined;
 };
 
-/** Get the authoritative bounded 1D history from the central registry */
+/** Get the authoritative bounded 1D history from the central registry (defensive copy) */
 export const getRegisteredHistory = (symbol: string): ChartDataPoint[] | undefined => {
-  return activeHistoryRegistry.get(symbol);
+  const hist = activeHistoryRegistry.get(symbol);
+  if (!hist) return undefined;
+  return hist.map(pt => ({ ...pt }));
 };
+
+// ── Day 24: Market data validation ──
+
+/** Maximum history points kept per symbol */
+const MAX_HISTORY_POINTS = 100;
+
+/** Accumulated rejection log for diagnostics (bounded) */
+const _rejectionLog: { timestamp: number; reason: string }[] = [];
+
+/** Record a data rejection for diagnostic purposes */
+const recordRejection = (reason: string) => {
+  _rejectionLog.push({ timestamp: Date.now(), reason });
+  if (_rejectionLog.length > 50) _rejectionLog.splice(0, _rejectionLog.length - 50);
+};
+
+/** Get a copy of recent rejections for event log purposes */
+export const getRecentRejections = (): { timestamp: number; reason: string }[] => {
+  return [..._rejectionLog];
+};
+
+/** Drain and clear recent rejections for synchronization with React event log */
+export const drainRecentRejections = (): { timestamp: number; reason: string }[] => {
+  return _rejectionLog.splice(0, _rejectionLog.length);
+};
+
+/** Helper to parse timestamp string for chronological comparison */
+const parseTimeOrder = (ts: string): number | null => {
+  const direct = Date.parse(ts);
+  if (!Number.isNaN(direct)) return direct;
+  const m = ts.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (m) {
+    let hours = parseInt(m[1], 10);
+    const mins = parseInt(m[2], 10);
+    const secs = m[3] ? parseInt(m[3], 10) : 0;
+    const ampm = m[4]?.toUpperCase();
+    if (ampm === 'PM' && hours < 12) hours += 12;
+    if (ampm === 'AM' && hours === 12) hours = 0;
+    return hours * 3600 + mins * 60 + secs;
+  }
+  return null;
+};
+
+/** Validate a single chart data point — reject non-finite/non-positive prices, negative volumes, empty timestamps */
+export const validateChartDataPoint = (pt: unknown): pt is ChartDataPoint => {
+  if (!pt || typeof pt !== 'object') return false;
+  const p = pt as Record<string, unknown>;
+  if (typeof p.timestamp !== 'string' || p.timestamp.trim().length === 0) return false;
+  if (typeof p.price !== 'number' || !Number.isFinite(p.price) || p.price <= 0) return false;
+  if (typeof p.volume !== 'number' || !Number.isFinite(p.volume) || p.volume < 0) return false;
+  return true;
+};
+
+/** Validate a full stock history record structure (type guard only — does not filter) */
+export const validateStockHistory = (
+  history: unknown
+): history is Record<string, ChartDataPoint[]> => {
+  if (!history || typeof history !== 'object' || Array.isArray(history)) return false;
+  const entries = Object.entries(history as Record<string, unknown>);
+  for (const [sym, pts] of entries) {
+    if (typeof sym !== 'string' || !Array.isArray(pts)) return false;
+    for (const pt of pts) {
+      if (!validateChartDataPoint(pt)) return false;
+    }
+  }
+  return true;
+};
+
+/**
+ * Sanitize stock history: filter invalid points per-symbol, deduplicate timestamps,
+ * sort chronologically, and bound to MAX_HISTORY_POINTS. Invalid points are logged
+ * but never silently replaced.
+ */
+export const sanitizeStockHistory = (
+  history: Record<string, unknown[]> | Record<string, ChartDataPoint[]>
+): Record<string, ChartDataPoint[]> => {
+  const result: Record<string, ChartDataPoint[]> = {};
+
+  for (const [sym, pts] of Object.entries(history)) {
+    if (!Array.isArray(pts)) {
+      recordRejection(`Symbol "${sym}": history is not an array`);
+      continue;
+    }
+
+    const validPoints: ChartDataPoint[] = [];
+    const seenTimestamps = new Set<string>();
+
+    for (const pt of pts) {
+      if (!validateChartDataPoint(pt)) {
+        recordRejection(`Symbol "${sym}": rejected invalid data point ${JSON.stringify(pt)}`);
+        continue;
+      }
+      // Deduplicate deterministically: keep only the first occurrence of each timestamp
+      if (seenTimestamps.has(pt.timestamp)) {
+        continue;
+      }
+      seenTimestamps.add(pt.timestamp);
+      validPoints.push({ timestamp: pt.timestamp, price: pt.price, volume: pt.volume });
+    }
+
+    // Sort chronologically if timestamps have parseable order
+    const sorted = [...validPoints].sort((a, b) => {
+      const ta = parseTimeOrder(a.timestamp);
+      const tb = parseTimeOrder(b.timestamp);
+      if (ta !== null && tb !== null) return ta - tb;
+      return 0; // preserve stable arrival order if not parseable
+    });
+
+    // Bound to maximum
+    const bounded = sorted.length > MAX_HISTORY_POINTS
+      ? sorted.slice(-MAX_HISTORY_POINTS)
+      : sorted;
+
+    result[sym] = bounded;
+  }
+
+  return result;
+};
+
 
 /** Generate baseline 1D historical series for all stocks */
 export const generateInitialStockHistory = (stocks: StockData[]): Record<string, ChartDataPoint[]> => {

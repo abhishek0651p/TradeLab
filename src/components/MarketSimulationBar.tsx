@@ -1,5 +1,5 @@
-import React from 'react';
-import { Play, Pause, RefreshCw, Zap, Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Pause, RefreshCw, Zap, Info, FileText, Trash2, X, Activity } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 import { SIMULATION_SPEED_PRESETS, SimulationSpeed } from '../types';
 
@@ -12,7 +12,11 @@ const MarketSimulationBar: React.FC = () => {
     simulateTick,
     tick,
     settings,
+    marketEvents,
+    clearMarketEvents,
   } = useTrading();
+
+  const [showEventLog, setShowEventLog] = useState(false);
 
   return (
     <aside
@@ -109,6 +113,21 @@ const MarketSimulationBar: React.FC = () => {
           <span>Step Tick</span>
         </button>
 
+        {/* Day 24: Market Event Log Toggle Button */}
+        <button
+          type="button"
+          className={`d23-sim-btn d24-sim-log-btn ${showEventLog ? 'd24-log-active' : ''}`}
+          onClick={() => setShowEventLog((prev) => !prev)}
+          aria-label="Toggle market event log"
+          title="View recent market simulation and replay events"
+        >
+          <FileText size={13} />
+          <span>Events</span>
+          {marketEvents.length > 0 && (
+            <span className="d24-event-count-pill">{marketEvents.length}</span>
+          )}
+        </button>
+
         {/* Informational Session Mode Tag */}
         <div
           className="d23-sim-session-tag"
@@ -118,6 +137,74 @@ const MarketSimulationBar: React.FC = () => {
           <span>Continuous Sim</span>
         </div>
       </div>
+
+      {/* Day 24: Collapsible Market Event Log Drawer */}
+      {showEventLog && (
+        <div className="d24-event-log-drawer">
+          <div className="d24-event-log-header">
+            <div className="d24-event-log-title">
+              <Activity size={14} />
+              <span>Market Event Log ({marketEvents.length} / 100)</span>
+            </div>
+            <div className="d24-event-log-actions">
+              {marketEvents.length > 0 && (
+                <button
+                  type="button"
+                  className="d24-event-log-clear-btn"
+                  onClick={clearMarketEvents}
+                  title="Clear all recorded market events"
+                >
+                  <Trash2 size={12} />
+                  <span>Clear</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="d24-event-log-close-btn"
+                onClick={() => setShowEventLog(false)}
+                title="Close event log"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          <div className="d24-event-log-list">
+            {marketEvents.length === 0 ? (
+              <div className="d24-event-log-empty">
+                <span>No market events logged yet. Events will appear as simulation ticks or replay runs.</span>
+              </div>
+            ) : (
+              marketEvents.map((evt) => {
+                const timeStr = new Date(evt.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                });
+                const badgeClass =
+                  evt.type.startsWith('REPLAY')
+                    ? 'd24-evt-badge-replay'
+                    : evt.type === 'INVALID_DATA_REJECTED'
+                    ? 'd24-evt-badge-error'
+                    : evt.type === 'MARKET_TICK'
+                    ? 'd24-evt-badge-tick'
+                    : 'd24-evt-badge-sim';
+
+                return (
+                  <div key={evt.id} className="d24-event-item">
+                    <span className="d24-event-time">{timeStr}</span>
+                    <span className={`d24-event-badge ${badgeClass}`}>{evt.type}</span>
+                    <div className="d24-event-desc">
+                      <span className="d24-event-msg">{evt.message}</span>
+                      {evt.detail && <span className="d24-event-detail">{evt.detail}</span>}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </aside>
   );
 };

@@ -17,7 +17,11 @@ import {
   PortfolioSnapshot,
   ChartDataPoint,
   SimulationSpeed,
-  SIMULATION_SPEED_PRESETS
+  SIMULATION_SPEED_PRESETS,
+  MarketEvent,
+  MarketEventType,
+  ReplayState,
+  ReplaySpeed
 } from '../types';
 import {
   INITIAL_ACCOUNT_STATE,
@@ -25,7 +29,10 @@ import {
   simulateMarketUpdate,
   updateMarketRegistry,
   generateInitialStockHistory,
-  appendStockTickHistory
+  appendStockTickHistory,
+  sanitizeStockHistory,
+  validateChartDataPoint,
+  drainRecentRejections
 } from '../data/mockData';
 
 // ──────────────────────────────────────────────
@@ -88,6 +95,16 @@ interface TradingContextType {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   clearNotifications: () => void;
+  // Day 24: Market event log
+  marketEvents: MarketEvent[];
+  clearMarketEvents: () => void;
+  // Day 24: Replay
+  replayState: ReplayState;
+  startReplay: (symbol: string) => void;
+  pauseReplay: () => void;
+  resumeReplay: () => void;
+  stopReplay: () => void;
+  setReplaySpeed: (speed: ReplaySpeed) => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -525,19 +542,7 @@ const isTradingSettings = (v: unknown): v is TradingSettings =>
 const isStockHistory = (v: unknown): v is Record<string, ChartDataPoint[]> =>
   v !== null &&
   typeof v === 'object' &&
-  !Array.isArray(v) &&
-  Object.values(v as Record<string, unknown>).every(
-    (arr) =>
-      Array.isArray(arr) &&
-      arr.every(
-        (pt) =>
-          pt !== null &&
-          typeof pt === 'object' &&
-          typeof (pt as Record<string, unknown>).timestamp === 'string' &&
-          typeof (pt as Record<string, unknown>).price === 'number' &&
-          typeof (pt as Record<string, unknown>).volume === 'number'
-      )
-  );
+  !Array.isArray(v);
 
 const isFiniteNumber = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v);
@@ -548,8 +553,8 @@ const isFiniteNumber = (v: unknown): v is number =>
 
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [account, setAccount] = useState<AccountState>(() =>
-  safeLoadJSON('tradelab_account', INITIAL_ACCOUNT_STATE, isAccountState)
-);
+    safeLoadJSON('tradelab_account', INITIAL_ACCOUNT_STATE, isAccountState)
+  );
   const [watchlist, setWatchlist] = useState<string[]>(() => safeLoadJSON('tradelab_watchlist', []));
   const [holdings, setHoldings] = useState<Holding[]>(() => safeLoadJSON('tradelab_holdings', []));
   const [trades, setTrades] = useState<Trade[]>(() => safeLoadJSON('tradelab_trades', []));
@@ -557,11 +562,20 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
   const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
   const [stockHistory, setStockHistory] = useState<Record<string, ChartDataPoint[]>>(() => {
-    const saved = safeLoadJSON<Record<string, ChartDataPoint[]>>('tradelab_stock_history', {}, isStockHistory);
-    if (!saved || Object.keys(saved).length === 0) {
-      return generateInitialStockHistory(MOCK_STOCKS);
+    const raw = safeLoadJSON<Record<string, unknown[]>>('tradelab_stock_history', {}, isStockHistory);
+    const initial = generateInitialStockHistory(MOCK_STOCKS);
+    if (!raw || Object.keys(raw).length === 0) {
+      return initial;
     }
-    return saved;
+    // Day 24: sanitize persisted history — filter invalid points, dedup, bound
+    const sanitized = sanitizeStockHistory(raw);
+    // Ensure all baseline stocks have history
+    MOCK_STOCKS.forEach(stock => {
+      if (!sanitized[stock.symbol] || sanitized[stock.symbol].length < 2) {
+        sanitized[stock.symbol] = initial[stock.symbol] || [];
+      }
+    });
+    return sanitized;
   });
   const [tick, setTick] = useState<number>(() =>
     safeLoadJSON<number>('tradelab_tick', 0, isFiniteNumber)
@@ -590,6 +604,55 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [notifications, setNotifications] = useState<Notification[]>(() =>
     safeLoadJSON<Notification[]>('tradelab_notifications', [])
   );
+
+  // ── Day 24: Market event log ──
+  const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
+  const marketEventsRef = useRef(marketEvents);
+  useEffect(() => { marketEventsRef.current = marketEvents; }, [marketEvents]);
+
+  const generateEventId = (): string =>
+    'EVT-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+  // Track last tick event timestamp to throttle MARKET_TICK events
+  const lastTickEventRef = useRef<number>(0);
+
+  const addMarketEvent = useCallback((type: MarketEventType, message: string, detail?: string) => {
+    // Throttle MARKET_TICK events: at most one per 2 seconds
+    if (type === 'MARKET_TICK') {
+      const now = Date.now();
+      if (now - lastTickEventRef.current < 2000) return;
+      lastTickEventRef.current = now;
+    }
+
+    const event: MarketEvent = {
+      id: generateEventId(),
+      type,
+      message,
+      timestamp: Date.now(),
+      detail
+    };
+    setMarketEvents(prev => {
+      const next = [event, ...prev];
+      return next.length > 100 ? next.slice(0, 100) : next;
+    });
+  }, []);
+
+  const clearMarketEvents = useCallback(() => {
+    setMarketEvents([]);
+  }, []);
+
+  // ── Day 24: Replay state ──
+  const INITIAL_REPLAY_STATE: ReplayState = {
+    active: false,
+    paused: false,
+    symbol: '',
+    snapshotData: [],
+    currentIndex: 0,
+    speed: 1
+  };
+  const [replayState, setReplayState] = useState<ReplayState>(INITIAL_REPLAY_STATE);
+  const replayStateRef = useRef(replayState);
+  useEffect(() => { replayStateRef.current = replayState; }, [replayState]);
   const [marketAlertState, setMarketAlertState] = useState<Record<string, boolean>>({});
 
   // Refs for atomic reads of latest state
@@ -612,10 +675,14 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
   useEffect(() => { marketAlertStateRef.current = marketAlertState; }, [marketAlertState]);
 
-  // Synchronize market registry with authoritative stocks and history
+  // Synchronize market registry with authoritative stocks and history, logging any rejections
   useEffect(() => {
     updateMarketRegistry(stocks, stockHistory);
-  }, [stocks, stockHistory]);
+    const rejections = drainRecentRejections();
+    rejections.forEach(r => {
+      addMarketEvent('INVALID_DATA_REJECTED', 'Market data point rejected', r.reason);
+    });
+  }, [stocks, stockHistory, addMarketEvent]);
 
   // Persist to localStorage
   useEffect(() => { localStorage.setItem('tradelab_account', JSON.stringify(account)); }, [account]);
@@ -1243,6 +1310,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setNotifications([]);
     setPortfolioSnapshots([]);
 
+    // Day 24: Clear replay and events on reset
+    setReplayState(INITIAL_REPLAY_STATE);
+    setMarketEvents([]);
+
     // Clear ALL persisted keys so a page refresh doesn't restore stale data
     localStorage.removeItem('tradelab_account');
     localStorage.removeItem('tradelab_watchlist');
@@ -1284,7 +1355,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, []);
 
-  // ── Simulation controls (Day 23) ──
+  // ── Simulation controls (Day 23 + Day 24 event logging) ──
 
   const simulationSpeed: SimulationSpeed = React.useMemo(() => {
     const sec = settings.autoSimIntervalSec;
@@ -1295,15 +1366,107 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [settings.autoSimIntervalSec]);
 
   const toggleSimulation = useCallback(() => {
-    setSettings(prev => ({ ...prev, autoSimEnabled: !prev.autoSimEnabled }));
-  }, []);
+    setSettings(prev => {
+      const nextEnabled = !prev.autoSimEnabled;
+      // Log event after toggling
+      addMarketEvent(
+        nextEnabled ? 'SIM_STARTED' : 'SIM_PAUSED',
+        nextEnabled ? 'Market simulation started' : 'Market simulation paused'
+      );
+      return { ...prev, autoSimEnabled: nextEnabled };
+    });
+  }, [addMarketEvent]);
 
   const setSimulationSpeed = useCallback((speed: SimulationSpeed) => {
     const preset = SIMULATION_SPEED_PRESETS.find(p => p.speed === speed);
     if (preset) {
       setSettings(prev => ({ ...prev, autoSimIntervalSec: preset.intervalSec }));
+      addMarketEvent('SIM_SPEED_CHANGED', `Simulation speed changed to ${speed}`);
     }
+  }, [addMarketEvent]);
+
+  // ── Day 24: Replay control methods ──
+
+  const startReplay = useCallback((symbol: string) => {
+    // Get snapshot of current history (deep copy for isolation)
+    const history = stockHistoryRef.current[symbol];
+    if (!history || history.length < 2) {
+      addMarketEvent('INVALID_DATA_REJECTED', `Cannot start replay for ${symbol}: insufficient history (${history?.length ?? 0} points)`);
+      return;
+    }
+
+    const snapshot = history.map(pt => ({ ...pt }));
+    setReplayState(prev => ({
+      active: true,
+      paused: false,
+      symbol,
+      snapshotData: snapshot,
+      currentIndex: 0,
+      speed: prev.speed || 1
+    }));
+    addMarketEvent('REPLAY_STARTED', `Historical replay started for ${symbol}`, `${snapshot.length} data points`);
+  }, [addMarketEvent]);
+
+  const pauseReplay = useCallback(() => {
+    setReplayState(prev => {
+      if (!prev.active || prev.paused) return prev;
+      addMarketEvent('REPLAY_PAUSED', `Replay paused for ${prev.symbol}`);
+      return { ...prev, paused: true };
+    });
+  }, [addMarketEvent]);
+
+  const resumeReplay = useCallback(() => {
+    setReplayState(prev => {
+      if (!prev.active || !prev.paused) return prev;
+      addMarketEvent('REPLAY_RESUMED', `Replay resumed for ${prev.symbol}`);
+      return { ...prev, paused: false };
+    });
+  }, [addMarketEvent]);
+
+  const stopReplay = useCallback(() => {
+    setReplayState(prev => {
+      if (!prev.active) return prev;
+      addMarketEvent('REPLAY_STOPPED', `Replay stopped for ${prev.symbol}`);
+      return { ...prev, active: false, paused: false, currentIndex: 0 };
+    });
+  }, [addMarketEvent]);
+
+  const setReplaySpeed = useCallback((speed: ReplaySpeed) => {
+    setReplayState(prev => ({ ...prev, speed }));
   }, []);
+
+  // Day 24: Replay timer effect — clean lifecycle, automatic speed adjustment and cleanup
+  useEffect(() => {
+    if (!replayState.active || replayState.paused) {
+      return;
+    }
+
+    const baseInterval = 500; // ms per data point at 1x
+    const intervalMs = Math.max(50, Math.round(baseInterval / replayState.speed));
+
+    const timerId = window.setInterval(() => {
+      setReplayState(prev => {
+        if (!prev.active || prev.paused) return prev;
+
+        const nextIndex = prev.currentIndex + 1;
+        if (nextIndex >= prev.snapshotData.length) {
+          addMarketEvent('REPLAY_COMPLETED', `Replay completed for ${prev.symbol}`);
+          return {
+            ...prev,
+            active: false,
+            paused: false,
+            currentIndex: prev.snapshotData.length - 1
+          };
+        }
+
+        return { ...prev, currentIndex: nextIndex };
+      });
+    }, intervalMs);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [replayState.active, replayState.paused, replayState.speed, addMarketEvent]);
 
   // ── Portfolio Snapshot Recording (Day 21) ──
 
@@ -1396,7 +1559,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Process pending orders and GTT triggers against the new prices
     processPendingOrdersRef.current();
-  }, [addNotification, recordPortfolioSnapshot]);
+
+    // Day 24: Log market tick event (throttled by addMarketEvent)
+    addMarketEvent('MARKET_TICK', `Tick #${nextTick} processed`);
+  }, [addNotification, recordPortfolioSnapshot, addMarketEvent]);
 
   // ── Auto-simulation interval (Day 15 & Day 23) ──
 
@@ -1455,7 +1621,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updateSettings,
       markNotificationRead,
       markAllNotificationsRead,
-      clearNotifications
+      clearNotifications,
+      marketEvents,
+      clearMarketEvents,
+      replayState,
+      startReplay,
+      pauseReplay,
+      resumeReplay,
+      stopReplay,
+      setReplaySpeed
     }}>
       {children}
     </TradingContext.Provider>
