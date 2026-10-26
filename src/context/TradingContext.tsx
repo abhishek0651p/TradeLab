@@ -485,7 +485,11 @@ const validateOrder = (
 // Safe localStorage loader
 // ──────────────────────────────────────────────
 
-function safeLoadJSON<T>(key: string, fallback: T): T {
+function safeLoadJSON<T>(
+  key: string,
+  fallback: T,
+  validate?: (parsed: unknown) => parsed is T
+): T {
   try {
     const saved = localStorage.getItem(key);
     if (!saved) return fallback;
@@ -493,18 +497,59 @@ function safeLoadJSON<T>(key: string, fallback: T): T {
     if (Array.isArray(fallback)) {
       return (Array.isArray(parsed) ? parsed : fallback) as T;
     }
+    if (validate && !validate(parsed)) return fallback;
     return parsed as T;
   } catch {
     return fallback;
   }
 }
 
+/** Type guards for persisted object stores */
+const isAccountState = (v: unknown): v is AccountState =>
+  v !== null &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  typeof (v as Record<string, unknown>).cashBalance === 'number' &&
+  typeof (v as Record<string, unknown>).portfolioValue === 'number' &&
+  typeof (v as Record<string, unknown>).startingBalance === 'number';
+
+const isTradingSettings = (v: unknown): v is TradingSettings =>
+  v !== null &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  typeof (v as Record<string, unknown>).autoSimEnabled === 'boolean' &&
+  typeof (v as Record<string, unknown>).autoSimIntervalSec === 'number' &&
+  typeof (v as Record<string, unknown>).showPnlPercent === 'boolean' &&
+  typeof (v as Record<string, unknown>).notificationsEnabled === 'boolean';
+
+const isStockHistory = (v: unknown): v is Record<string, ChartDataPoint[]> =>
+  v !== null &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  Object.values(v as Record<string, unknown>).every(
+    (arr) =>
+      Array.isArray(arr) &&
+      arr.every(
+        (pt) =>
+          pt !== null &&
+          typeof pt === 'object' &&
+          typeof (pt as Record<string, unknown>).timestamp === 'string' &&
+          typeof (pt as Record<string, unknown>).price === 'number' &&
+          typeof (pt as Record<string, unknown>).volume === 'number'
+      )
+  );
+
+const isFiniteNumber = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(v);
+
 // ──────────────────────────────────────────────
 // Provider
 // ──────────────────────────────────────────────
 
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [account, setAccount] = useState<AccountState>(() => safeLoadJSON('tradelab_account', INITIAL_ACCOUNT_STATE));
+  const [account, setAccount] = useState<AccountState>(() =>
+  safeLoadJSON('tradelab_account', INITIAL_ACCOUNT_STATE, isAccountState)
+);
   const [watchlist, setWatchlist] = useState<string[]>(() => safeLoadJSON('tradelab_watchlist', []));
   const [holdings, setHoldings] = useState<Holding[]>(() => safeLoadJSON('tradelab_holdings', []));
   const [trades, setTrades] = useState<Trade[]>(() => safeLoadJSON('tradelab_trades', []));
@@ -512,15 +557,17 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
   const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
   const [stockHistory, setStockHistory] = useState<Record<string, ChartDataPoint[]>>(() => {
-    const saved = safeLoadJSON<Record<string, ChartDataPoint[]>>('tradelab_stock_history', {});
+    const saved = safeLoadJSON<Record<string, ChartDataPoint[]>>('tradelab_stock_history', {}, isStockHistory);
     if (!saved || Object.keys(saved).length === 0) {
       return generateInitialStockHistory(MOCK_STOCKS);
     }
     return saved;
   });
-  const [tick, setTick] = useState<number>(() => safeLoadJSON<number>('tradelab_tick', 0));
+  const [tick, setTick] = useState<number>(() =>
+    safeLoadJSON<number>('tradelab_tick', 0, isFiniteNumber)
+  );
   const [settings, setSettings] = useState<TradingSettings>(() => {
-    const saved = safeLoadJSON<TradingSettings>('tradelab_settings', DEFAULT_SETTINGS);
+    const saved = safeLoadJSON<TradingSettings>('tradelab_settings', DEFAULT_SETTINGS, isTradingSettings);
     return { ...DEFAULT_SETTINGS, ...saved, autoSimIntervalSec: clampInterval(saved.autoSimIntervalSec ?? DEFAULT_SETTINGS.autoSimIntervalSec) };
   });
   const [autoSimActive, setAutoSimActive] = useState(false);
@@ -1188,6 +1235,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setStockHistory(initialHistory);
     updateMarketRegistry(MOCK_STOCKS, initialHistory);
     setTick(0);
+    // Reset snapshot-dedup ref so the next tick records a fresh snapshot
+    // (otherwise a stale positive tick id could suppress the first new one)
+    lastSnapshotTickRef.current = -1;
 
     // Clear notifications and snapshots first, then add reset notification
     setNotifications([]);

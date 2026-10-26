@@ -549,11 +549,13 @@ const StockDetail = () => {
   }, [symbol, timeframe, isTimeframeSupported]);
 
   // Synchronize chart data on market ticks without flashing loading state
+  // Include timeframe in deps so a timeframe change while simulation is running
+  // immediately refreshes the chart instead of using a stale closure
   useEffect(() => {
     if (symbol && isTimeframeSupported && stock?.price) {
       setChartData(generateChartData(symbol, timeframe as '1D' | '1W' | '1M' | '1Y', stock.price));
     }
-  }, [stock?.price]);
+  }, [stock?.price, symbol, timeframe]);
 
   useEffect(() => {
     if (!toast) return;
