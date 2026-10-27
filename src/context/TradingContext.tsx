@@ -21,7 +21,8 @@ import {
   MarketEvent,
   MarketEventType,
   ReplayState,
-  ReplaySpeed
+  ReplaySpeed,
+  TradeJournalEntry
 } from '../types';
 import {
   INITIAL_ACCOUNT_STATE,
@@ -105,6 +106,14 @@ interface TradingContextType {
   resumeReplay: () => void;
   stopReplay: () => void;
   setReplaySpeed: (speed: ReplaySpeed) => void;
+  // Day 25: Trade Journal
+  tradeJournal: TradeJournalEntry[];
+  addJournalEntry: (entry: Omit<TradeJournalEntry, 'id' | 'createdAt'>) => void;
+  updateJournalEntry: (id: string, patch: Partial<Pick<TradeJournalEntry, 'title' | 'content' | 'tags'>>) => void;
+  deleteJournalEntry: (id: string) => void;
+  getJournalEntriesForTrade: (tradeId: string) => TradeJournalEntry[];
+  // Day 25: Strategy labels on trades
+  updateTradeStrategy: (tradeId: string, strategy: string) => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -547,6 +556,19 @@ const isStockHistory = (v: unknown): v is Record<string, ChartDataPoint[]> =>
 const isFiniteNumber = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v);
 
+/** Day 25: Type guard for persisted trade journal entries */
+const isTradeJournalEntry = (v: unknown): v is TradeJournalEntry =>
+  v !== null &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  typeof (v as any).id === 'string' && (v as any).id.trim().length > 0 &&
+  typeof (v as any).tradeId === 'string' &&
+  typeof (v as any).title === 'string' &&
+  typeof (v as any).content === 'string' &&
+  Array.isArray((v as any).tags) &&
+  (v as any).tags.every((t: unknown) => typeof t === 'string') &&
+  typeof (v as any).createdAt === 'number' && Number.isFinite((v as any).createdAt);
+
 // ──────────────────────────────────────────────
 // Provider
 // ──────────────────────────────────────────────
@@ -655,6 +677,51 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { replayStateRef.current = replayState; }, [replayState]);
   const [marketAlertState, setMarketAlertState] = useState<Record<string, boolean>>({});
 
+  // ── Day 25: Trade Journal ──
+  // Scoped to the current account: cleared on account reset so notes from one
+  // account never leak into another after a reset or switch.
+  const [tradeJournal, setTradeJournal] = useState<TradeJournalEntry[]>(() => {
+    const raw = safeLoadJSON<unknown[]>('tradelab_trade_journal', []);
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(isTradeJournalEntry);
+  });
+
+  const generateJournalId = (): string =>
+    'JNL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  const addJournalEntry = useCallback((entry: Omit<TradeJournalEntry, 'id' | 'createdAt'>) => {
+    const newEntry: TradeJournalEntry = {
+      ...entry,
+      id: generateJournalId(),
+      createdAt: Date.now()
+    };
+    setTradeJournal(prev => [newEntry, ...prev]);
+  }, []);
+
+  const updateJournalEntry = useCallback((
+    id: string,
+    patch: Partial<Pick<TradeJournalEntry, 'title' | 'content' | 'tags'>>
+  ) => {
+    setTradeJournal(prev => prev.map(e =>
+      e.id === id ? { ...e, ...patch } : e
+    ));
+  }, []);
+
+  const deleteJournalEntry = useCallback((id: string) => {
+    setTradeJournal(prev => prev.filter(e => e.id !== id));
+  }, []);
+
+  const getJournalEntriesForTrade = useCallback((tradeId: string) => {
+    return tradeJournal.filter(e => e.tradeId === tradeId);
+  }, [tradeJournal]);
+
+  // Day 25: Update trade strategy label
+  const updateTradeStrategy = useCallback((tradeId: string, strategy: string) => {
+    setTrades(prev => prev.map(t =>
+      t.id === tradeId ? { ...t, strategy: strategy.trim() || undefined } : t
+    ));
+  }, []);
+
   // Refs for atomic reads of latest state
   const accountRef = useRef(account);
   const holdingsRef = useRef(holdings);
@@ -697,6 +764,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('tradelab_notifications', JSON.stringify(notifications)); }, [notifications]);
   useEffect(() => { localStorage.setItem('tradelab_portfolio_snapshots', JSON.stringify(portfolioSnapshots)); }, [portfolioSnapshots]);
+  // Day 25: persist trade journal
+  useEffect(() => { localStorage.setItem('tradelab_trade_journal', JSON.stringify(tradeJournal)); }, [tradeJournal]);
 
   // ── Watchlist ──
 
@@ -1313,6 +1382,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Day 24: Clear replay and events on reset
     setReplayState(INITIAL_REPLAY_STATE);
     setMarketEvents([]);
+    // Day 25: Clear trade journal on reset (scoped to account)
+    setTradeJournal([]);
 
     // Clear ALL persisted keys so a page refresh doesn't restore stale data
     localStorage.removeItem('tradelab_account');
@@ -1326,6 +1397,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem('tradelab_tick');
     localStorage.removeItem('tradelab_notifications');
     localStorage.removeItem('tradelab_portfolio_snapshots');
+    // Day 25: Clear trade journal so previous account's notes cannot leak into
+    // a fresh account after reset or switch.
+    localStorage.removeItem('tradelab_trade_journal');
     // Note: tradelab_settings is intentionally preserved across resets
 
     // Add reset notification AFTER clearing — this survives because
@@ -1629,7 +1703,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       pauseReplay,
       resumeReplay,
       stopReplay,
-      setReplaySpeed
+      setReplaySpeed,
+      // Day 25: Trade Journal
+      tradeJournal,
+      addJournalEntry,
+      updateJournalEntry,
+      deleteJournalEntry,
+      getJournalEntriesForTrade,
+      // Day 25: Strategy labels
+      updateTradeStrategy
     }}>
       {children}
     </TradingContext.Provider>

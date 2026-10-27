@@ -8181,3 +8181,304 @@ tr:hover td {
   color: var(--text-muted);
   word-break: break-all;
 }
+
+/* ==============================================
+   Day 25: Strategy Analytics & Trade Journal Styles
+   ============================================== */
+
+/* Strategy Badges */
+.strategy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  letter-spacing: 0.2px;
+}
+
+/* Sample Size Badges */
+.sample-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.sample-badge-ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.sample-badge-warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+/* Trade Table Actions */
+.trade-action-icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.trade-action-icon-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border);
+}
+
+.trade-journal-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.trade-journal-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+}
+
+.trade-journal-btn-active {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #c4b5fd;
+  font-weight: 600;
+}
+
+/* Strategy Preset Chips in Modal */
+.strategy-preset-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.strategy-preset-chip:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+
+/* Trade Journal Component */
+.trade-journal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.trade-journal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trade-journal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trade-journal-icon {
+  color: #8b5cf6;
+  flex-shrink: 0;
+}
+
+.trade-journal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.trade-journal-scope-id {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: monospace;
+  display: block;
+  margin-top: 2px;
+}
+
+.trade-journal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trade-journal-form,
+.trade-journal-edit-form {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.trade-journal-form-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.trade-journal-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.trade-journal-empty-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0 0 4px 0;
+}
+
+.trade-journal-empty-sub {
+  font-size: 0.82rem;
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.4;
+}
+
+.trade-journal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.trade-journal-entry {
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s;
+}
+
+.trade-journal-entry:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.trade-journal-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.trade-journal-entry-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trade-journal-entry-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.trade-journal-entry-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.trade-journal-linked-trade {
+  font-size: 0.7rem;
+  color: #93c5fd;
+  font-family: monospace;
+}
+
+.trade-journal-entry-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.trade-journal-entry-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.trade-journal-entry-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.trade-journal-entry-btn-delete:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.trade-journal-entry-content {
+  font-size: 0.85rem;
+  color: var(--text-main);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.trade-journal-entry-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.trade-journal-tag-icon {
+  color: var(--text-muted);
+}
+
+.trade-journal-tag {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+}

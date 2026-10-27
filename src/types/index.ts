@@ -46,6 +46,18 @@ export interface Trade {
   orderId?: string;
   executionId?: string;
   orderType?: OrderType;
+  // Day 25: User-entered strategy label (optional, leaves undefined for execution-created trades)
+  strategy?: string;
+}
+
+// Day 25: Trade Journal entry
+export interface TradeJournalEntry {
+  id: string;
+  tradeId: string; // Links to a stable trade ID
+  title: string;
+  content: string;
+  tags: string[];
+  createdAt: number;
 }
 
 export interface Order {
