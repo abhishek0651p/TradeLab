@@ -34,8 +34,10 @@ import {
   Layers,
   Zap,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Calculator
 } from 'lucide-react';
+import { PositionSizingCalculator } from '../components/PositionSizingCalculator';
 
 import {
   computeMarketValue,
@@ -450,6 +452,11 @@ const Risk = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Position Sizing Calculator (Day 26) ── */}
+      <div className="risk-calculator-section" style={{ marginTop: '32px' }}>
+        <PositionSizingCalculator />
       </div>
 
       {/* ── Empty State (when no holdings) ── */}
