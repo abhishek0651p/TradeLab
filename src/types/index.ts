@@ -51,9 +51,10 @@ export interface Trade {
 }
 
 // Day 25: Trade Journal entry
+// tradeId is optional: present = linked to a stable trade ID; absent = general observation
 export interface TradeJournalEntry {
   id: string;
-  tradeId: string; // Links to a stable trade ID
+  tradeId?: string; // undefined = general note; string = linked to trade
   title: string;
   content: string;
   tags: string[];

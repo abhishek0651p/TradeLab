@@ -562,7 +562,7 @@ const isTradeJournalEntry = (v: unknown): v is TradeJournalEntry =>
   typeof v === 'object' &&
   !Array.isArray(v) &&
   typeof (v as any).id === 'string' && (v as any).id.trim().length > 0 &&
-  typeof (v as any).tradeId === 'string' &&
+  (typeof (v as any).tradeId === 'string' || (v as any).tradeId === undefined) &&
   typeof (v as any).title === 'string' &&
   typeof (v as any).content === 'string' &&
   Array.isArray((v as any).tags) &&
@@ -683,7 +683,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [tradeJournal, setTradeJournal] = useState<TradeJournalEntry[]>(() => {
     const raw = safeLoadJSON<unknown[]>('tradelab_trade_journal', []);
     if (!Array.isArray(raw)) return [];
-    return raw.filter(isTradeJournalEntry);
+    return raw
+      .filter(isTradeJournalEntry)
+      .map(entry => ({
+        ...entry,
+        // Day 25.1: migrate ambiguous empty-string trade IDs to undefined so
+        // general notes are explicitly represented rather than hidden behind
+        // an empty trade ID.
+        tradeId: entry.tradeId && entry.tradeId.trim().length > 0 ? entry.tradeId : undefined
+      }));
   });
 
   const generateJournalId = (): string =>

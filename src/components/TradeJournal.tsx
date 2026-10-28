@@ -79,7 +79,7 @@ export const TradeJournal: React.FC<TradeJournalProps> = ({ tradeId, tradeSymbol
       return;
     }
     addJournalEntry({
-      tradeId: tradeId ?? '',
+      tradeId: tradeId || undefined,
       title: newTitle.trim(),
       content: newContent.trim(),
       tags: parseTags(newTags)
@@ -294,8 +294,10 @@ export const TradeJournal: React.FC<TradeJournalProps> = ({ tradeId, tradeSymbol
                 <div className="trade-journal-entry-meta">
                   <span className="trade-journal-entry-title">{entry.title}</span>
                   <span className="trade-journal-entry-time">{formatDateTime(entry.createdAt)}</span>
-                  {!tradeId && entry.tradeId && (
+                  {entry.tradeId ? (
                     <span className="trade-journal-linked-trade">Trade: {entry.tradeId}</span>
+                  ) : (
+                    <span className="trade-journal-general-note">General observation</span>
                   )}
                 </div>
                 <div className="trade-journal-entry-actions">
