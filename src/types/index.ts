@@ -119,6 +119,20 @@ export interface PlaceOrderParams {
   trailingConfig?: TrailingStopConfig;
 }
 
+/** Day 27: A planned order transferred from the position-sizing calculator to the order form.
+ *  The user reviews all values before submission — this is a draft, not a live order.
+ */
+export interface PlannedOrder {
+  symbol: string;
+  side: OrderSide;
+  quantity: number;
+  entryPrice: number;
+  stopLossPrice?: number;
+  targetPrice?: number;
+  source: 'position-sizer';
+  createdAt: number;
+}
+
 export interface PlaceOrderResult {
   success: boolean;
   error?: string;

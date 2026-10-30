@@ -22,7 +22,8 @@ import {
   MarketEventType,
   ReplayState,
   ReplaySpeed,
-  TradeJournalEntry
+  TradeJournalEntry,
+  PlannedOrder
 } from '../types';
 import {
   INITIAL_ACCOUNT_STATE,
@@ -114,6 +115,9 @@ interface TradingContextType {
   getJournalEntriesForTrade: (tradeId: string) => TradeJournalEntry[];
   // Day 25: Strategy labels on trades
   updateTradeStrategy: (tradeId: string, strategy: string) => void;
+  // Day 27: Planned order transferred from position-sizing calculator to order form
+  plannedOrder: PlannedOrder | null;
+  setPlannedOrder: (order: PlannedOrder | null) => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -673,6 +677,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     speed: 1
   };
   const [replayState, setReplayState] = useState<ReplayState>(INITIAL_REPLAY_STATE);
+
+  // ── Day 27: Planned order transferred from position-sizing calculator ──
+  const [plannedOrder, setPlannedOrder] = useState<PlannedOrder | null>(null);
   const replayStateRef = useRef(replayState);
   useEffect(() => { replayStateRef.current = replayState; }, [replayState]);
   const [marketAlertState, setMarketAlertState] = useState<Record<string, boolean>>({});
@@ -1410,6 +1417,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem('tradelab_trade_journal');
     // Note: tradelab_settings is intentionally preserved across resets
 
+    // Day 27: Clear any planned order transferred from the position-sizing calculator
+    setPlannedOrder(null);
+
     // Add reset notification AFTER clearing — this survives because
     // React batches the setNotifications([]) and this addNotification
     // but addNotification uses functional updater, so it appends to []
@@ -1719,7 +1729,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteJournalEntry,
       getJournalEntriesForTrade,
       // Day 25: Strategy labels
-      updateTradeStrategy
+      updateTradeStrategy,
+      // Day 27: Planned order transferred from position-sizing calculator
+      plannedOrder,
+      setPlannedOrder
     }}>
       {children}
     </TradingContext.Provider>

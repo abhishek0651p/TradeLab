@@ -6,6 +6,7 @@ import {
   PositionSizingInputs
 } from '../risk/PositionSizingModel';
 import { computePortfolioValue } from '../risk/RiskCalculationModel';
+import { validateOrderRisk } from '../risk/PreTradeRiskValidator';
 import {
   Calculator,
   Shield,
@@ -18,7 +19,8 @@ import {
   Percent,
   Layers,
   ArrowRight,
-  Info
+  Info,
+  Send
 } from 'lucide-react';
 
 /* ── Currency and Percent formatters ─────────────────────────────────────────── */
@@ -34,7 +36,7 @@ const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-IN').format(value);
 
 export const PositionSizingCalculator: React.FC = () => {
-  const { account, holdings, stocks } = useTrading();
+  const { account, holdings, stocks, setPlannedOrder } = useTrading();
 
   // Read current portfolio equity
   const totalEquity = useMemo(() => {
@@ -100,6 +102,43 @@ export const PositionSizingCalculator: React.FC = () => {
 
   // Quick risk percent presets
   const presets = [0.5, 1.0, 1.5, 2.0, 3.0];
+
+  // Day 27: Pre-trade risk validation on the calculator's own inputs.
+  // Pure — does not place any order. Only produces a validation result for display
+  // and a planned-order draft for transfer to the order form.
+  const riskValidation = useMemo(() => {
+    if (!selectedSymbol || numEntry <= 0) return null;
+    return validateOrderRisk({
+      symbol: selectedSymbol,
+      side: direction,
+      quantity: calculation.isValid ? calculation.recommendedQuantity : 0,
+      entryPrice: numEntry,
+      stopLossPrice: numStopLoss > 0 ? numStopLoss : undefined,
+      targetPrice: numTarget && numTarget > 0 ? numTarget : undefined,
+      cashBalance: account.cashBalance,
+      holdings,
+      stocks
+    });
+  }, [selectedSymbol, direction, numEntry, numStopLoss, numTarget, account.cashBalance, holdings, stocks, calculation.isValid, calculation.recommendedQuantity]);
+
+  // Day 27: Transfer the planned order to the order form for final review.
+  // The user still must confirm on the stock detail page before any order is placed.
+  const handleTransferToOrder = () => {
+    if (!selectedSymbol || !riskValidation?.valid) return;
+    const plannedOrder = {
+      symbol: selectedSymbol,
+      side: direction,
+      quantity: calculation.recommendedQuantity,
+      entryPrice: numEntry,
+      stopLossPrice: numStopLoss > 0 ? numStopLoss : undefined,
+      targetPrice: numTarget && numTarget > 0 ? numTarget : undefined,
+      source: 'position-sizer' as const,
+      createdAt: Date.now()
+    };
+    setPlannedOrder(plannedOrder);
+  };
+
+  const canTransfer = Boolean(selectedSymbol && riskValidation?.valid && calculation.isValid && calculation.recommendedQuantity > 0);
 
   // Stop loss distance stats
   const slDistance = useMemo(() => {
@@ -500,6 +539,23 @@ export const PositionSizingCalculator: React.FC = () => {
               <li key={idx}>{warn}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* ── Day 27: Transfer to Order Form ── */}
+      {canTransfer && (
+        <div className="position-calc-transfer-panel">
+          <button
+            type="button"
+            className="position-calc-transfer-btn"
+            onClick={handleTransferToOrder}
+          >
+            <Send size={14} /> Transfer to Order Form
+          </button>
+          <p className="text-muted small">
+            The calculator's position size and risk parameters will be pre-filled in the order
+            preview for your review. No order is placed until you confirm on the stock detail page.
+          </p>
         </div>
       )}
 
