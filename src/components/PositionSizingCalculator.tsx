@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import {
   computePositionSizing,
@@ -37,6 +38,7 @@ const formatNumber = (value: number) =>
 
 export const PositionSizingCalculator: React.FC = () => {
   const { account, holdings, stocks, setPlannedOrder } = useTrading();
+  const navigate = useNavigate();
 
   // Read current portfolio equity
   const totalEquity = useMemo(() => {
@@ -136,6 +138,9 @@ export const PositionSizingCalculator: React.FC = () => {
       createdAt: Date.now()
     };
     setPlannedOrder(plannedOrder);
+    // Navigate to the stock detail page where the planned order is pre-filled
+    // into the existing OrderEntry for review. No order is executed here.
+    navigate(`/stock/${selectedSymbol}`);
   };
 
   const canTransfer = Boolean(selectedSymbol && riskValidation?.valid && calculation.isValid && calculation.recommendedQuantity > 0);

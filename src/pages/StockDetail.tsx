@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTrading } from '../context/TradingContext';
 import { generateChartData } from '../data/mockData';
 import { calculateEMA, calculateRSI, calculateVolumeStats, calculateSupportResistance, computeTechnicalCondition } from '../analysis/TechnicalIndicators';
 import { Star, ArrowLeft, TrendingUp, TrendingDown, BarChart3, Clock, Activity, Building2, Globe, Tag, X, AlertTriangle, GitCompare, Play, Pause, Square, FastForward } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Line, Bar } from 'recharts';
-import { ChartDataPoint, Holding, OrderSide, OrderType, StockData, TrailingStopConfig, REPLAY_SPEED_PRESETS, ReplaySpeed } from '../types';
+import { ChartDataPoint, Holding, OrderSide, OrderType, PlannedOrder, StockData, TrailingStopConfig, REPLAY_SPEED_PRESETS, ReplaySpeed } from '../types';
 import { computePreOrderRiskSnapshot, PreOrderRiskSnapshot } from '../risk/RiskCalculationModel';
 import TechnicalIndicatorPanel from '../components/TechnicalIndicatorPanel';
 import SupportResistancePanel from '../components/SupportResistancePanel';
@@ -16,6 +16,73 @@ import StockComparison from '../components/StockComparison';
 type Timeframe = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y';
 
 const SUPPORTED_TIMEFRAMES: Timeframe[] = ['1D', '1W', '1M', '1Y'];
+
+// ──────────────────────────────────────────────
+// Planned Order Prefill (Day 27.1)
+// ──────────────────────────────────────────────
+
+/** Shape of a planned order from the position-sizing calculator. */
+export interface OrderPrefill {
+  quantity: number;
+  entryPrice: number;
+  stopLossPrice?: number;
+  targetPrice?: number;
+}
+
+/** Result of mapping a planned order onto OrderEntry form fields. */
+export interface AppliedPrefill {
+  orderType: OrderType;
+  quantity: string;
+  limitPrice: string;
+  triggerPrice: string;
+}
+
+/**
+ * Maps a planned order (from the position-sizing calculator) onto the
+ * OrderEntry form fields. Pure, deterministic, side-aware.
+ *
+ * Mapping rules (best effort — the user reviews before submitting):
+ *   - quantity            -> quantity
+ *   - entryPrice          -> limitPrice (the intended entry as a limit)
+ *   - stopLossPrice/targetPrice -> triggerPrice
+ *
+ * Priority when multiple are present (for SELL where TARGET is supported):
+ *   TARGET > STOP_MARKET > LIMIT > MARKET.
+ * For BUY, a single BUY order cannot express a protective SELL stop,
+ * so stop/target are carried into triggerPrice but default orderType
+ * is LIMIT (if entry differs from market) or MARKET.
+ */
+export const computeAppliedPrefill = (
+  prefill: OrderPrefill,
+  marketPrice: number,
+  side: OrderSide
+): AppliedPrefill => {
+  const quantity = String(prefill.quantity);
+  const limitPrice = prefill.entryPrice > 0 ? String(prefill.entryPrice) : '';
+  const hasStop = Boolean(prefill.stopLossPrice && prefill.stopLossPrice > 0);
+  const hasTarget = Boolean(prefill.targetPrice && prefill.targetPrice > 0);
+
+  // Carry stop-loss / target into the trigger field. When both are present the
+  // target takes precedence for SELL (TARGET order type); otherwise the
+  // stop-loss is carried. Values remain editable.
+  const triggerSource = (side === 'SELL' && hasTarget)
+    ? prefill.targetPrice!
+    : (hasStop ? prefill.stopLossPrice! : (hasTarget ? prefill.targetPrice! : undefined));
+  const triggerPrice = triggerSource && triggerSource > 0 ? String(triggerSource) : '';
+
+  let orderType: OrderType = 'MARKET';
+  if (side === 'SELL' && hasTarget) {
+    orderType = 'TARGET';
+  } else if (hasStop && side === 'SELL') {
+    orderType = 'STOP_MARKET';
+  } else if (prefill.entryPrice > 0 && prefill.entryPrice !== marketPrice) {
+    orderType = 'LIMIT';
+  } else {
+    orderType = 'MARKET';
+  }
+
+  return { orderType, quantity, limitPrice, triggerPrice };
+};
 
 // ──────────────────────────────────────────────
 // Order Entry Modal (Day 8 — upgraded with MARKET/LIMIT)
@@ -42,14 +109,38 @@ interface OrderEntryProps {
       trailingConfig?: TrailingStopConfig | null;
     }
   ) => void;
+  /** Prefill from a planned order (position-sizing calculator).  When provided,
+   * the form fields are populated once per `prefillToken` — user edits are never
+   * clobbered by re-rendering the same token, satisfying duplicate-prefill prevention. */
+  prefill?: OrderPrefill | null;
+  /** Opaque token that changes whenever a new planned order is consumed.  The
+   * OrderEntry useEffect compares this to `appliedPrefillTokenRef` to decide
+   * whether to re-apply the prefill. */
+  prefillToken?: string;
 }
 
-export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, holdings, stocks, onClose, onPlaceOrder }) => {
+export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, price, side, cashBalance, quantityOnHand, holdings, stocks, onClose, onPlaceOrder, prefill, prefillToken }) => {
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState<string>('');
   const [limitPrice, setLimitPrice] = useState<string>('');
   const [triggerPrice, setTriggerPrice] = useState<string>('');
   const [error, setError] = useState<string>('');
+
+  // Apply planned-order prefill exactly once per token so a user's edits are
+  // never clobbered when the same planned order remains pending (duplicate-prefill
+  // prevention). A different token (new planned order) re-applies.
+  const appliedPrefillTokenRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!prefill || !prefillToken) return;
+    if (appliedPrefillTokenRef.current === prefillToken) return;
+    appliedPrefillTokenRef.current = prefillToken;
+    const applied = computeAppliedPrefill(prefill, price, side);
+    setQuantity(applied.quantity);
+    setLimitPrice(applied.limitPrice);
+    setTriggerPrice(applied.triggerPrice);
+    setOrderType(applied.orderType);
+    setError('');
+  }, [prefill, prefillToken, price, side]);
 
   // Day 20: GTT / conditional order state
   const [isGTT, setIsGTT] = useState<boolean>(false);
@@ -518,13 +609,18 @@ const StockDetail = () => {
   const navigate = useNavigate();
   const {
     stocks, watchlist, addToWatchlist, removeFromWatchlist, placeOrder, account, holdings,
-    replayState, startReplay, pauseReplay, resumeReplay, stopReplay, setReplaySpeed, stockHistory
+    replayState, startReplay, pauseReplay, resumeReplay, stopReplay, setReplaySpeed, stockHistory,
+    plannedOrder, setPlannedOrder
   } = useTrading();
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [isChartLoading, setIsChartLoading] = useState(false);
-  const [orderModal, setOrderModal] = useState<{ side: OrderSide } | null>(null);
+  const [orderModal, setOrderModal] = useState<{
+    side: OrderSide;
+    prefill?: OrderPrefill;
+    prefillToken?: string;
+  } | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [showEMA20, setShowEMA20] = useState(true);
@@ -734,6 +830,11 @@ const StockDetail = () => {
     });
 
     if (result.success) {
+      // Day 27.1: A planned order consumed by a successful submission is cleared
+      // so it cannot be re-submitted or re-prefilled.
+      if (orderModal?.prefillToken) {
+        setPlannedOrder(null);
+      }
       if (result.execution) {
         setToast({
           type: 'success',
@@ -751,6 +852,31 @@ const StockDetail = () => {
     } else {
       setToast({ type: 'error', message: result.error ?? 'Order failed.' });
     }
+  };
+
+  // Day 27.1: Is there a planned order awaiting review on this stock detail page?
+  const plannedOrderReady = Boolean(plannedOrder && plannedOrder.symbol === symbol);
+
+  // Open the existing OrderEntry with the planned order pre-filled for review.
+  // The user can edit any supported field or cancel — no order is placed until
+  // they confirm on the order form.
+  const handleReviewPlan = () => {
+    if (!plannedOrder) return;
+    setOrderModal({
+      side: plannedOrder.side,
+      prefill: {
+        quantity: plannedOrder.quantity,
+        entryPrice: plannedOrder.entryPrice,
+        stopLossPrice: plannedOrder.stopLossPrice,
+        targetPrice: plannedOrder.targetPrice
+      },
+      prefillToken: String(plannedOrder.createdAt)
+    });
+  };
+
+  // Day 27.1: Discard the planned order without placing any order.
+  const handleCancelPlan = () => {
+    setPlannedOrder(null);
   };
 
   return (
@@ -1230,6 +1356,60 @@ const StockDetail = () => {
         </div>
       </div>
 
+      {/* ── Day 27.1: Planned Order Review ── */}
+      {plannedOrderReady && plannedOrder && (
+        <div className="card sd-planned-card">
+          <div className="sd-planned-header">
+            <div>
+              <h3 className="sd-section-title">Planned Order Ready for Review</h3>
+              <p className="text-muted small">
+                Transferred from the Position Sizing Calculator. Review and edit the
+                values below before submitting — no order is placed until you confirm.
+              </p>
+            </div>
+            <span className="status-badge status-info">PLANNED</span>
+          </div>
+
+          <div className="sd-planned-grid">
+            <div className="sd-planned-row">
+              <span>Side</span>
+              <strong style={{ color: plannedOrder.side === 'BUY' ? 'var(--success)' : 'var(--danger)' }}>
+                {plannedOrder.side}
+              </strong>
+            </div>
+            <div className="sd-planned-row">
+              <span>Quantity</span>
+              <strong>{plannedOrder.quantity} shares</strong>
+            </div>
+            <div className="sd-planned-row">
+              <span>Entry Price</span>
+              <strong>{formatCurrency(plannedOrder.entryPrice)}</strong>
+            </div>
+            {plannedOrder.stopLossPrice && (
+              <div className="sd-planned-row">
+                <span>Stop-Loss</span>
+                <strong style={{ color: 'var(--danger)' }}>{formatCurrency(plannedOrder.stopLossPrice)}</strong>
+              </div>
+            )}
+            {plannedOrder.targetPrice && (
+              <div className="sd-planned-row">
+                <span>Target</span>
+                <strong style={{ color: 'var(--success)' }}>{formatCurrency(plannedOrder.targetPrice)}</strong>
+              </div>
+            )}
+          </div>
+
+          <div className="sd-planned-actions">
+            <button className="btn btn-primary" onClick={handleReviewPlan}>
+              Review &amp; Edit
+            </button>
+            <button className="btn btn-outline" onClick={handleCancelPlan}>
+              Cancel Plan
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card sd-trade-card">
         <h3 className="sd-section-title" style={{ textAlign: 'center' }}>Trade {stock.symbol}</h3>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginBottom: '24px', fontSize: '0.9rem' }}>
@@ -1257,7 +1437,16 @@ const StockDetail = () => {
           quantityOnHand={holding ? holding.quantity : 0}
           holdings={holdings}
           stocks={stocks}
-          onClose={() => setOrderModal(null)}
+          prefill={orderModal.prefill}
+          prefillToken={orderModal.prefillToken}
+          onClose={() => {
+            // Day 27.1: Closing/cancelling the order form clears the planned order.
+            // Only the explicit "Cancel Plan" button or a successful submission
+            // will have already cleared it; here we clear on X/Cancel close too.
+            const hadPrefill = Boolean(orderModal?.prefill);
+            setOrderModal(null);
+            if (hadPrefill) setPlannedOrder(null);
+          }}
           onPlaceOrder={(orderType, qty, lp, tp, gttOptions) => handleOrderSubmit(orderModal.side, orderType, qty, lp, tp, gttOptions)}
         />
       )}
