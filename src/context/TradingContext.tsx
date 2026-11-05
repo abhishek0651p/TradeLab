@@ -36,6 +36,28 @@ import {
   validateChartDataPoint,
   drainRecentRejections
 } from '../data/mockData';
+import {
+  computeCostBasis,
+  computeCurrentMarketValue,
+  computeUnrealizedPnL,
+  computeRealizedPnL,
+  computePortfolioEquity,
+  computeAvailableBuyingPower,
+  computeAvailableSellQuantityFn,
+  computePortfolioSummaryMetrics
+} from '../engine/TradingAccounting';
+import {
+  isReservationEligible,
+  getReservationPrice,
+  computeReservedBuyCapital,
+  computeReservedSellQuantity,
+  computeAvailableBuyingPower as computeAvailableBuyingPowerReservation,
+  computeAvailableSellQuantity,
+  validateBuyOrderReservation,
+  validateSellOrderReservation,
+  revalidateOrderAtExecution,
+  computeAccountReservationMetrics
+} from '../engine/ReservationModel';
 
 // ──────────────────────────────────────────────
 // Settings model
@@ -159,6 +181,10 @@ const isValidTransition = (from: OrderStatus, to: OrderStatus): boolean => {
 
 // ──────────────────────────────────────────────
 // Pure helper: revalidate an order before final execution
+// Delegates to the centralized ReservationModel so BUY orders are
+// validated against available buying power (cash minus other pending BUY
+// reservations) and SELL orders against available holding quantity
+// (holdings minus other pending SELL reservations).
 // ──────────────────────────────────────────────
 
 interface RevalidateResult {
@@ -170,68 +196,39 @@ const revalidateExecution = (
   order: Order,
   cashBalance: number,
   holdings: Holding[],
+  orders: Order[],
   stocks: StockData[]
 ): RevalidateResult => {
-  const stock = stocks.find(s => s.symbol === order.symbol)
-  if (!stock) {
-    return { valid: false, reason: 'Stock data not available.' }
-  }
-
-  const currentPrice = stock.price
-
-  // Re-check cash for BUY
-  if (order.side === 'BUY') {
-    const requiredCash = currentPrice * order.quantity
-    if (cashBalance < requiredCash) {
-      return {
-        valid: false,
-        reason: `Insufficient cash at execution. Required: ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(requiredCash)} but available: ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(cashBalance)}`
-      }
-    }
-  }
-
-  // Re-check holdings for SELL
-  if (order.side === 'SELL') {
-    const holding = holdings.find(h => h.symbol === order.symbol)
-    const availableQty = holding ? holding.quantity : 0
-    if (availableQty < order.quantity) {
-      return {
-        valid: false,
-        reason: `Insufficient holdings at execution. You own ${availableQty} shares of ${order.symbol} but need ${order.quantity}.`
-      }
-    }
-  }
-
-  return { valid: true }
+  return revalidateOrderAtExecution(order, cashBalance, holdings, orders, stocks);
 }
 
 // ──────────────────────────────────────────────
-// Pure helper: compute account metrics
+// Pure helper: compute account metrics (standardized accounting)
 // ──────────────────────────────────────────────
 
 const computeAccountMetrics = (
   cashBalance: number,
   newHoldings: Holding[],
   stocksList: StockData[],
-  prevRealizedPnL: number
+  prevRealizedPnL: number,
+  reservedBuyCapital: number = 0
 ): AccountState => {
-  let investedValue = 0
-  let totalCostBasis = 0
-  let totalCurrentValue = 0
-  newHoldings.forEach(h => {
-    const stock = stocksList.find(s => s.symbol === h.symbol)
-    const currentPrice = stock ? stock.price : h.averageBuyPrice
-    investedValue += currentPrice * h.quantity
-    totalCostBasis += h.averageBuyPrice * h.quantity
-    totalCurrentValue += currentPrice * h.quantity
-  })
+  const accounting = computePortfolioSummaryMetrics(
+    cashBalance,
+    newHoldings,
+    stocksList,
+    reservedBuyCapital,
+    []
+  )
+
   return {
     startingBalance: INITIAL_ACCOUNT_STATE.startingBalance,
     cashBalance,
-    investedValue,
-    portfolioValue: cashBalance + investedValue,
+    investedValue: accounting.costBasis,
+    portfolioValue: accounting.portfolioEquity,
+    // Carry forward accumulated realized PnL (previous trades + current gain)
     realizedPnL: prevRealizedPnL,
-    unrealizedPnL: totalCurrentValue - totalCostBasis
+    unrealizedPnL: accounting.unrealizedPnL
   }
 }
 
@@ -377,7 +374,8 @@ const validateOrder = (
   params: PlaceOrderParams,
   stocks: StockData[],
   cashBalance: number,
-  holdings: Holding[]
+  holdings: Holding[],
+  existingOrders: Order[]
 ): ValidationResult => {
   // Validate side
   if (params.side !== 'BUY' && params.side !== 'SELL') {
@@ -481,30 +479,34 @@ const validateOrder = (
     }
   }
 
-  // Validate cash for BUY
+  // Validate cash for BUY using reservation model
   if (params.side === 'BUY') {
-    let checkPrice = params.currentPrice;
-    if (params.orderType === 'LIMIT' || params.orderType === 'STOP_LIMIT') checkPrice = params.limitPrice!;
-    else if (params.orderType === 'STOP_MARKET' || params.orderType === 'TARGET') checkPrice = effectiveTriggerPrice!;
+    let reservationPrice = params.currentPrice;
+    if (params.orderType === 'LIMIT' || params.orderType === 'STOP_LIMIT') reservationPrice = params.limitPrice!;
+    else if (params.orderType === 'STOP_MARKET' || params.orderType === 'TARGET') reservationPrice = effectiveTriggerPrice!;
 
-    const requiredCash = checkPrice * params.quantity;
-    if (cashBalance < requiredCash) {
-      return {
-        valid: false,
-        error: 'Insufficient cash. Required: ' + formatINR(requiredCash) + ' but available: ' + formatINR(cashBalance) + '.'
-      };
+    const buyValidation = validateBuyOrderReservation(
+      params.quantity,
+      reservationPrice,
+      cashBalance,
+      existingOrders,
+      stocks
+    );
+    if (!buyValidation.valid) {
+      return { valid: false, error: buyValidation.error };
     }
   }
 
-  // Validate holdings for SELL
+  // Validate holdings for SELL using reservation model
   if (params.side === 'SELL') {
-    const holding = holdings.find(h => h.symbol === params.symbol);
-    const availableQty = holding ? holding.quantity : 0;
-    if (availableQty < params.quantity) {
-      return {
-        valid: false,
-        error: 'Insufficient holdings. You own ' + availableQty + ' shares of ' + params.symbol + ' but are trying to sell ' + params.quantity + '.'
-      };
+    const sellValidation = validateSellOrderReservation(
+      params.quantity,
+      params.symbol,
+      holdings,
+      existingOrders
+    );
+    if (!sellValidation.valid) {
+      return { valid: false, error: sellValidation.error };
     }
   }
 
@@ -887,11 +889,16 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       newCash = 0;
     }
 
+    // Compute reserved buy capital from other pending orders (excluding the one being executed)
+    const otherOrders = ordersRef.current.filter(o => o.id !== order.id);
+    const reservedBuyCapital = computeReservedBuyCapital(otherOrders, stocksRef.current);
+
     const newAccount = computeAccountMetrics(
       newCash,
       newHoldings,
       stocksRef.current,
-      currentAccount.realizedPnL + realizedGain
+      currentAccount.realizedPnL + realizedGain,
+      reservedBuyCapital
     );
 
     // Create trade record
@@ -921,7 +928,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const currentHoldings = holdingsRef.current;
 
     // Validate
-    const validation = validateOrder(params, currentStocks, currentAccount.cashBalance, currentHoldings);
+    const validation = validateOrder(params, currentStocks, currentAccount.cashBalance, currentHoldings, ordersRef.current);
     if (!validation.valid) {
       // Create a rejected order record for history
       const rejectedOrder: Order = {
@@ -1270,11 +1277,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         continue;
       }
 
-      // 3. Revalidate before execution
+      // 3. Revalidate before execution (use centralized reservation model)
       const revalidation = revalidateExecution(
         currentState,
         accountRef.current.cashBalance,
         holdingsRef.current,
+        updatedOrders,  // Pass current working orders array so other pending orders' reservations are considered
         currentStocks
       );
 
@@ -1618,6 +1626,26 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updatedStocks = simulateMarketUpdate(stocksRef.current, nextTick);
     stocksRef.current = updatedStocks;
     setStocks(updatedStocks);
+
+    // Recalculate account metrics against updated prices (BUG 03 fix:
+    // stale account metrics during market simulation ticks — Dashboard vs
+    // Portfolio mismatch when prices move but account state isn't refreshed).
+    const reservedBuyCapital = computeReservedBuyCapital(ordersRef.current, updatedStocks);
+    const refreshedAccount = computeAccountMetrics(
+      accountRef.current.cashBalance,
+      holdingsRef.current,
+      updatedStocks,
+      accountRef.current.realizedPnL,
+      reservedBuyCapital
+    );
+    if (
+      refreshedAccount.investedValue !== accountRef.current.investedValue ||
+      refreshedAccount.portfolioValue !== accountRef.current.portfolioValue ||
+      refreshedAccount.unrealizedPnL !== accountRef.current.unrealizedPnL
+    ) {
+      setAccount(refreshedAccount);
+      accountRef.current = refreshedAccount;
+    }
 
     // Append bounded tick to stock history (max 100 points)
     const updatedHistory = appendStockTickHistory(stockHistoryRef.current, updatedStocks, 100);

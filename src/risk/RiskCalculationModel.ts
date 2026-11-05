@@ -338,11 +338,16 @@ export const computePreOrderRiskSnapshot = (
 
   // Estimated allocation for the new/adjusted position.
   // If buying a new symbol, estimate its allocation % from the order value.
+  // If buying additional shares of an existing holding, include the existing
+  // position value so the allocation % reflects the true total exposure
+  // (BUG 04 fix: pre-trade concentration previously underestimated allocation
+  // for additional BUY orders).
   // If selling, compute the new largest % from the estimated holdings.
   let estimatedAllocationPercent = 0;
   if (side === 'BUY') {
-    // The new/adjusted holding's estimated allocation % = (price * quantity) / estimatedPortfolioValue * 100
-    estimatedAllocationPercent = (currentPrice * quantity / Math.max(estimatedPortfolioValue, 1)) * 100;
+    const estimatedHolding = estimatedHoldings.find(h => h.symbol === symbol);
+    const symbolTotalValue = (estimatedHolding ? estimatedHolding.quantity : quantity) * currentPrice;
+    estimatedAllocationPercent = (symbolTotalValue / Math.max(estimatedPortfolioValue, 1)) * 100;
   } else {
     // Selling: the remaining portfolio's largest allocation may change.
     // We compute the new largest % from the estimated holdings for context.
