@@ -62,7 +62,8 @@ const Settings = () => {
     setSimulationSpeed,
     tick,
     resetAccount,
-    updateSettings
+    updateSettings,
+    bracketPersistenceStatus
   } = useTrading();
 
   const [resetConfirmStep, setResetConfirmStep] = useState<0 | 1 | 2>(0);
@@ -379,7 +380,38 @@ const Settings = () => {
           <div className="d15-divider" />
 
           {/* Reset */}
-          <div className="d15-reset-group">
+          <div className="d15-reset-group" id="reset-account-section">
+            {/* Day 30.4: Bracket Storage Protection Warning */}
+            {bracketPersistenceStatus !== 'AVAILABLE' && (
+              <div
+                className="d15-confirm-box"
+                style={{
+                  marginBottom: '16px',
+                  borderColor: 'var(--warning, #f59e0b)',
+                  background: 'rgba(245, 158, 11, 0.08)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '14px 16px',
+                  borderRadius: '8px'
+                }}
+              >
+                <AlertTriangle size={20} color="var(--warning, #f59e0b)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  <strong style={{ color: 'var(--warning, #f59e0b)', fontSize: '0.95rem' }}>
+                    Bracket Storage Protected ({bracketPersistenceStatus.toLowerCase().replace('_', ' ')})
+                  </strong>
+                  <p style={{ margin: '4px 0 6px 0', fontSize: '0.875rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                    Bracket orders are temporarily disabled because existing stored bracket data could not be safely loaded without potential data loss.
+                    Normal market and limit orders remain available. Existing bracket data is currently preserved and protected from being overwritten.
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                    Resetting your virtual account below is <strong>destructive</strong>: it will permanently discard all account state, holdings, orders, and the incompatible stored bracket data, allowing normal bracket persistence to resume.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="d15-setting-label d15-danger-label">
               <Trash2 size={16} /> Reset Account
             </div>

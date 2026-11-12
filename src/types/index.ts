@@ -133,6 +133,48 @@ export interface PlannedOrder {
   createdAt: number;
 }
 
+/** ── Day 30: Bracket Order Types ─────────────────────────────────────────────────
+ *  A bracket group consists of a parent entry order and two child exit orders
+ *  (stop-loss and target). One-Cancels-the-Other (OCO) logic ensures only one
+ *  exit executes, protecting the remaining position.
+ * ──────────────────────────────────────────────────────────────────────────────── */
+export interface BracketGroup {
+  id: string;                 // Unique bracket group identifier
+  parentOrderId: string;     // The entry order ID
+  stopLossOrderId: string;   // The stop-loss child order ID
+  targetOrderId: string;     // The target child order ID
+  positionId: string;        // Linked position identifier
+  ocoGroupId: string;        // OCO group identifier (same as bracket id)
+  symbol: string;            // Underlying stock symbol
+  side: OrderSide;           // 'BUY' or 'SELL'
+  entryPrice: number;        // Entry price of the parent order
+  stopLossPrice: number;     // Stop-loss price
+  targetPrice: number;       // Target price
+  originalQuantity: number;  // Original order quantity
+  remainingQuantity: number; // Remaining quantity to protect
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  createdAt: number;         // Creation timestamp
+  updatedAt: number;         // Last update timestamp
+}
+
+export interface BracketOrderResult {
+  success: boolean;
+  error?: string;
+  bracketGroup?: BracketGroup;
+  executedOrder?: Order;
+}
+
+/** ── Day 30: OCO Execution Result ────────────────────────────────────────────── */
+export interface OCOExecutionResult {
+  success: boolean;
+  error?: string;
+  executedLeg: 'STOP_LOSS' | 'TARGET'; // Which leg executed
+  cancelledLeg: 'STOP_LOSS' | 'TARGET'; // Which leg was cancelled
+  remainingQuantity: number; // Position quantity still protected
+  realizedPnL: number; // P&L from the executed leg
+  cancelledOrderId: string; // Order ID that was cancelled
+}
+
 export interface PlaceOrderResult {
   success: boolean;
   error?: string;

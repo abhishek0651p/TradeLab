@@ -33,7 +33,7 @@ const Orders: React.FC = () => {
   const {
     trades, orders, executions, stocks, cancelOrder,
     processPendingOrders, simulateTick, tick,
-    autoSimActive, settings,
+    autoSimActive, settings, bracketPersistenceStatus,
   } = useTrading();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('orders');
@@ -179,6 +179,37 @@ const Orders: React.FC = () => {
   return (
     <div className="orders-page">
       <h1 className="page-title">Trading Activity</h1>
+
+      {/* Day 30.3.2: User-facing warning when bracket storage is protected */}
+      {bracketPersistenceStatus !== 'AVAILABLE' && (
+        <div
+          className="d15-confirm-box"
+          style={{
+            margin: '0 0 20px 0',
+            borderColor: 'var(--warning, #f59e0b)',
+            background: 'rgba(245, 158, 11, 0.08)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+            padding: '14px 16px',
+            borderRadius: '8px'
+          }}
+        >
+          <AlertTriangle size={20} color="var(--warning, #f59e0b)" style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <strong style={{ color: 'var(--warning, #f59e0b)', fontSize: '0.95rem' }}>
+              Bracket Orders Temporarily Disabled
+            </strong>
+            <p style={{ margin: '4px 0 6px 0', fontSize: '0.875rem', color: 'var(--text-secondary, #94a3b8)' }}>
+              Stored bracket order data could not be safely loaded ({bracketPersistenceStatus.toLowerCase().replace('_', ' ')}).
+              Existing raw data has been protected from being overwritten, but new bracket orders cannot be saved.
+            </p>
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary, #94a3b8)' }}>
+              You can continue placing standard market and limit orders normally. If you want to discard the incompatible bracket data and re-enable bracket orders, you can reset your account in <a href="/settings" style={{ color: 'var(--primary, #3b82f6)', textDecoration: 'underline' }}>Settings</a>.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="orders-summary-grid d8-summary-grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>

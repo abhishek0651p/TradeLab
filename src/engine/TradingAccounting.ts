@@ -8,13 +8,14 @@ import { Holding, StockData, Order, OrderSide, Trade } from '../types';
 
 /** Standardized financial definitions per Day 29 audit. */
 
-/** Cost basis: total purchase cost of currently held positions. */
-export const computeCostBasis = (holdings: Holding[], stocks: StockData[]): number => {
+/** Cost basis: total purchase cost of currently held positions.
+ *  Uses the actual acquisition price (averageBuyPrice × Quantity),
+ *  not the current market price — so unrealized P&L reflects real gain/loss.
+ */
+export const computeCostBasis = (holdings: Holding[], _stocks: StockData[]): number => {
   let total = 0;
   holdings.forEach(h => {
-    const stock = stocks.find(s => s.symbol === h.symbol);
-    const price = stock ? stock.price : h.averageBuyPrice;
-    total += Number((price * h.quantity).toFixed(2));
+    total += Number((h.averageBuyPrice * h.quantity).toFixed(2));
   });
   return Number(total.toFixed(2));
 };

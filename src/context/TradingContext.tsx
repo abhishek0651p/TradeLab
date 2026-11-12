@@ -37,27 +37,37 @@ import {
   drainRecentRejections
 } from '../data/mockData';
 import {
-  computeCostBasis,
-  computeCurrentMarketValue,
-  computeUnrealizedPnL,
-  computeRealizedPnL,
-  computePortfolioEquity,
-  computeAvailableBuyingPower,
-  computeAvailableSellQuantityFn,
+  createBracketGroup,
+  activateChildExits,
+  cancelEntryAndChildren,
+  rejectEntryAndChildren,
+  findOrphanedChildren,
+  getRemainingQuantity,
+  BracketGroup,
+  validateBracketOrder,
+} from '../engine/BracketOrderEngine';
+import {
+  evaluateOCOTriggers,
+  executeOCO,
+  OCO_TIE_BREAKER,
+} from '../engine/OCOExecutionEngine';
+import {
   computePortfolioSummaryMetrics
 } from '../engine/TradingAccounting';
 import {
-  isReservationEligible,
-  getReservationPrice,
   computeReservedBuyCapital,
-  computeReservedSellQuantity,
-  computeAvailableBuyingPower as computeAvailableBuyingPowerReservation,
-  computeAvailableSellQuantity,
   validateBuyOrderReservation,
   validateSellOrderReservation,
-  revalidateOrderAtExecution,
-  computeAccountReservationMetrics
+  revalidateOrderAtExecution
 } from '../engine/ReservationModel';
+import {
+  BRACKET_STORAGE_KEY,
+  serializeBracketGroups,
+  deserializeBracketGroups,
+  inspectBracketStorage,
+  reconcileBracketState,
+  BracketPersistenceStatus
+} from '../engine/BracketRecoveryEngine';
 
 // ──────────────────────────────────────────────
 // Settings model
@@ -140,6 +150,19 @@ interface TradingContextType {
   // Day 27: Planned order transferred from position-sizing calculator to order form
   plannedOrder: PlannedOrder | null;
   setPlannedOrder: (order: PlannedOrder | null) => void;
+  // Day 30: Bracket Order Management
+  bracketGroups: BracketGroup[];
+  // Day 30.3.2: Expose bracket persistence availability status and recovery issue
+  bracketPersistenceStatus: BracketPersistenceStatus;
+  placeBracketOrder: (
+    side: OrderSide,
+    quantity: number,
+    entryPrice: number,
+    stopLossPrice: number,
+    targetPrice: number,
+    symbol: string,
+    companyName: string
+  ) => { success: boolean; bracketGroup?: BracketGroup; entryOrder?: Order; execution?: Execution; error?: string };
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -211,7 +234,8 @@ const computeAccountMetrics = (
   newHoldings: Holding[],
   stocksList: StockData[],
   prevRealizedPnL: number,
-  reservedBuyCapital: number = 0
+  reservedBuyCapital: number = 0,
+  startingBalance: number = INITIAL_ACCOUNT_STATE.startingBalance
 ): AccountState => {
   const accounting = computePortfolioSummaryMetrics(
     cashBalance,
@@ -222,7 +246,7 @@ const computeAccountMetrics = (
   )
 
   return {
-    startingBalance: INITIAL_ACCOUNT_STATE.startingBalance,
+    startingBalance,
     cashBalance,
     investedValue: accounting.costBasis,
     portfolioValue: accounting.portfolioEquity,
@@ -409,12 +433,12 @@ const validateOrder = (
   const effectiveTriggerPrice = params.triggerPrice ?? (
     params.isGTT && params.trailingConfig
       ? (params.side === 'SELL'
-          ? (params.trailingConfig.distanceType === 'percent'
-              ? Number((params.currentPrice * (1 - params.trailingConfig.distance / 100)).toFixed(2))
-              : Number((params.currentPrice - params.trailingConfig.distance).toFixed(2)))
-          : (params.trailingConfig.distanceType === 'percent'
-              ? Number((params.currentPrice * (1 + params.trailingConfig.distance / 100)).toFixed(2))
-              : Number((params.currentPrice + params.trailingConfig.distance).toFixed(2))))
+        ? (params.trailingConfig.distanceType === 'percent'
+          ? Number((params.currentPrice * (1 - params.trailingConfig.distance / 100)).toFixed(2))
+          : Number((params.currentPrice - params.trailingConfig.distance).toFixed(2)))
+        : (params.trailingConfig.distanceType === 'percent'
+          ? Number((params.currentPrice * (1 + params.trailingConfig.distance / 100)).toFixed(2))
+          : Number((params.currentPrice + params.trailingConfig.distance).toFixed(2))))
       : undefined
   );
 
@@ -586,7 +610,51 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [watchlist, setWatchlist] = useState<string[]>(() => safeLoadJSON('tradelab_watchlist', []));
   const [holdings, setHoldings] = useState<Holding[]>(() => safeLoadJSON('tradelab_holdings', []));
   const [trades, setTrades] = useState<Trade[]>(() => safeLoadJSON('tradelab_trades', []));
-  const [orders, setOrders] = useState<Order[]>(() => safeLoadJSON('tradelab_orders', []));
+
+  // Day 30.3: Recover and reconcile bracket groups and child orders on load
+  // Day 30.3.1: Use inspectBracketStorage to distinguish valid vs protected storage
+  const initialReconciliation = React.useMemo(() => {
+    try {
+      const rawOrders = safeLoadJSON<Order[]>('tradelab_orders', []);
+      const rawHoldings = safeLoadJSON<Holding[]>('tradelab_holdings', []);
+
+      const rawBracketStorage =
+        typeof localStorage !== 'undefined'
+          ? localStorage.getItem(BRACKET_STORAGE_KEY)
+          : null;
+
+      const storageResult = inspectBracketStorage(rawBracketStorage);
+
+      const reconciliation = reconcileBracketState(
+        storageResult.groups,
+        rawOrders,
+        rawHoldings
+      );
+
+      return {
+        ...reconciliation,
+        allowBracketPersistence:
+          storageResult.status === 'missing' ||
+          storageResult.status === 'valid',
+        recoveryIssue:
+          storageResult.status === 'unsupported_version' ||
+            storageResult.status === 'malformed' ||
+            storageResult.status === 'invalid_envelope'
+            ? storageResult.status
+            : null,
+      };
+    } catch {
+      return {
+        reconciledGroups: [] as BracketGroup[],
+        reconciledOrders: safeLoadJSON<Order[]>('tradelab_orders', []),
+        issuesDetected: ['Bracket storage initialization failed'],
+        allowBracketPersistence: false,
+        recoveryIssue: 'invalid_envelope' as const,
+      };
+    }
+  }, []);
+
+  const [orders, setOrders] = useState<Order[]>(() => initialReconciliation.reconciledOrders);
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
   const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
   const [stockHistory, setStockHistory] = useState<Record<string, ChartDataPoint[]>>(() => {
@@ -611,6 +679,17 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [settings, setSettings] = useState<TradingSettings>(() => {
     const saved = safeLoadJSON<TradingSettings>('tradelab_settings', DEFAULT_SETTINGS, isTradingSettings);
     return { ...DEFAULT_SETTINGS, ...saved, autoSimIntervalSec: clampInterval(saved.autoSimIntervalSec ?? DEFAULT_SETTINGS.autoSimIntervalSec) };
+  });
+  // ── Day 30: Bracket group tracking (restored via reconciliation) ──
+  const [bracketGroups, setBracketGroups] = useState<BracketGroup[]>(() => initialReconciliation.reconciledGroups);
+  // Day 30.3.1: Persistence guard — prevents overwriting protected storage
+  const bracketPersistenceAllowedRef = React.useRef(initialReconciliation.allowBracketPersistence);
+  // Day 30.3.2: Persistence status state (reactive for UI consumers)
+  const [bracketPersistenceStatus, setBracketPersistenceStatus] = useState<BracketPersistenceStatus>(() => {
+    if (initialReconciliation.allowBracketPersistence) return 'AVAILABLE';
+    if (initialReconciliation.recoveryIssue === 'unsupported_version') return 'UNSUPPORTED_VERSION';
+    if (initialReconciliation.recoveryIssue === 'malformed') return 'MALFORMED';
+    return 'INVALID_ENVELOPE';
   });
   const [autoSimActive, setAutoSimActive] = useState(false);
 
@@ -758,6 +837,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { ordersRef.current = orders; }, [orders]);
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
   useEffect(() => { marketAlertStateRef.current = marketAlertState; }, [marketAlertState]);
+  const bracketGroupsRef = useRef(bracketGroups);
+  useEffect(() => { bracketGroupsRef.current = bracketGroups; }, [bracketGroups]);
 
   // Synchronize market registry with authoritative stocks and history, logging any rejections
   useEffect(() => {
@@ -783,6 +864,19 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_portfolio_snapshots', JSON.stringify(portfolioSnapshots)); }, [portfolioSnapshots]);
   // Day 25: persist trade journal
   useEffect(() => { localStorage.setItem('tradelab_trade_journal', JSON.stringify(tradeJournal)); }, [tradeJournal]);
+  // Day 30.3: persist bracket groups
+  // Day 30.3.1: Guarded — skip write when storage contains unsupported/malformed data
+  useEffect(() => {
+    if (!bracketPersistenceAllowedRef.current) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(BRACKET_STORAGE_KEY, serializeBracketGroups(bracketGroups));
+    } catch {
+      // Safe fallback if storage quota exceeded or unavailable
+    }
+  }, [bracketGroups]);
 
   // ── Watchlist ──
 
@@ -898,7 +992,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       newHoldings,
       stocksRef.current,
       currentAccount.realizedPnL + realizedGain,
-      reservedBuyCapital
+      reservedBuyCapital,
+      currentAccount.startingBalance
     );
 
     // Create trade record
@@ -1085,6 +1180,157 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   }, [executeOrderInternal]);
 
+  // ── Day 30: Place bracket order ──
+
+  const placeBracketOrder = useCallback((
+    side: OrderSide,
+    quantity: number,
+    entryPrice: number,
+    stopLossPrice: number,
+    targetPrice: number,
+    symbol: string,
+    companyName: string
+  ) => {
+    // Day 30.3.2: Prevent creating bracket orders when persistence is disabled due to protected storage
+    if (!bracketPersistenceAllowedRef.current) {
+      const errorMsg = 'Bracket orders are temporarily disabled because stored bracket data could not be safely loaded. Reset the account to enable bracket orders with a clean state.';
+      addNotification(
+        'ORDER_REJECTED',
+        'WARNING',
+        'Bracket Order Blocked',
+        errorMsg,
+        { symbol, route: '/settings' }
+      );
+      return { success: false, error: errorMsg };
+    }
+
+    const currentStocks = stocksRef.current;
+    const currentAccount = accountRef.current;
+    const currentHoldings = holdingsRef.current;
+    const currentOrders = ordersRef.current;
+
+    // 1. Validate bracket order
+    const bracketResult = createBracketGroup(
+      side, quantity, entryPrice, stopLossPrice, targetPrice,
+      symbol, companyName, currentStocks.find(s => s.symbol === symbol)?.price ?? 0,
+      currentAccount.cashBalance, currentHoldings, currentOrders, currentStocks
+    );
+
+    if (!bracketResult.success || !bracketResult.bracketGroup) {
+      // Create rejected entry order for history
+      const rejectedOrder: Order = {
+        ...bracketResult.entryOrder,
+        status: 'REJECTED' as OrderStatus,
+        rejectionReason: bracketResult.error ?? 'Order validation failed.'
+      };
+      setOrders(prev => [rejectedOrder, ...prev]);
+      addNotification(
+        'ORDER_REJECTED',
+        'ERROR',
+        'Bracket Order Rejected',
+        bracketResult.error ?? 'Order validation failed.',
+        { symbol, route: '/stock/' + symbol }
+      );
+      return { success: false, error: bracketResult.error };
+    }
+
+    const { entryOrder, stopLossOrder, targetOrder, bracketGroup } = bracketResult;
+
+    // 2. Add all three orders to state
+    setOrders(prev => [entryOrder, stopLossOrder, targetOrder, ...prev]);
+
+    // 3. Check if entry should execute immediately
+    // MARKET orders always execute; LIMIT orders execute only when price condition is met
+    const marketPrice = currentStocks.find(s => s.symbol === symbol)?.price ?? 0;
+    const isMarketOrder = entryOrder.type === 'MARKET';
+    const limitConditionMet = isMarketOrder ||
+      (entryOrder.side === 'BUY' && marketPrice <= entryOrder.requestedPrice) ||
+      (entryOrder.side === 'SELL' && marketPrice >= entryOrder.requestedPrice);
+
+    if (!limitConditionMet) {
+      // LIMIT entry not yet satisfied — keep entry PENDING, children stay PENDING
+      // Bracket group is stored but remains INACTIVE until entry executes
+      const inactiveBracketGroup: BracketGroup = {
+        ...bracketGroup,
+        status: 'ACTIVE', // bracket group itself is active, entry just pending
+      };
+      setBracketGroups(prev => [inactiveBracketGroup, ...prev]);
+      addNotification(
+        'ORDER_TRIGGERED',
+        'INFO',
+        'Bracket Order Pending',
+        `${side} ${quantity} ${symbol} LIMIT bracket placed. Entry will execute when market ${side === 'BUY' ? 'drops to' : 'rises to'} ${formatINR(entryPrice)}.`,
+        { symbol, orderId: bracketGroup.id, route: '/stock/' + symbol }
+      );
+      return {
+        success: true,
+        bracketGroup: inactiveBracketGroup,
+        entryOrder,
+      };
+    }
+
+    // 4. LIMIT condition met (or MARKET) — execute entry immediately
+    // Use the internal executeOrderInternal for direct execution
+    const result = executeOrderInternal(entryOrder, entryPrice);
+
+    // 5. Update order to executed
+    const executedEntryOrder: Order = {
+      ...entryOrder,
+      executionPrice: Number(entryPrice.toFixed(2)),
+      totalValue: result.execution.totalValue,
+      status: 'EXECUTED' as OrderStatus,
+      executedAt: result.execution.executedAt
+    };
+
+    // 6. Entry executed — activate child exits
+    const activationResult = activateChildExits(bracketGroup, [executedEntryOrder, stopLossOrder, targetOrder, ...currentOrders]);
+
+    if (!activationResult.success) {
+      // Rollback: cancel all orders
+      setOrders(prev => prev.filter(o => o.id !== entryOrder.id && o.id !== stopLossOrder.id && o.id !== targetOrder.id));
+      setBracketGroups(prev => prev.filter(bg => bg.id !== bracketGroup.id));
+      addNotification(
+        'ORDER_REJECTED',
+        'ERROR',
+        'Bracket Order Failed',
+        activationResult.error ?? 'Could not activate exits.',
+        { symbol, route: '/stock/' + symbol }
+      );
+      return { success: false, error: activationResult.error };
+    }
+
+    // 7. Update state with executed entry and activated children
+    const updatedOrders = activationResult.orders.map(o => {
+      if (o.id === bracketGroup.parentOrderId) return executedEntryOrder;
+      return o;
+    });
+
+    setOrders(updatedOrders);
+    setExecutions(prev => [result.execution, ...prev]);
+    setTrades(prev => [result.trade, ...prev]);
+    setHoldings(result.newHoldings);
+    setAccount(result.newAccount);
+
+    // 8. Store bracket group
+    setBracketGroups(prev => [bracketGroup, ...prev]);
+
+    // 8. Add notification
+    addNotification(
+      'ORDER_EXECUTED',
+      'SUCCESS',
+      'Bracket Order Executed',
+      `${side} ${quantity} ${symbol} bracket placed. Stop-loss: ${formatINR(stopLossPrice)}, Target: ${formatINR(targetPrice)}`,
+      { symbol, orderId: bracketGroup.id, route: '/stock/' + symbol }
+    );
+
+    return {
+      success: true,
+      bracketGroup,
+      entryOrder: executedEntryOrder,
+      execution: result.execution,
+    };
+  }, [executeOrderInternal, addNotification]);
+
   // ── cancelOrder ──
 
   const cancelOrder = useCallback((orderId: string): { success: boolean; error?: string } => {
@@ -1093,6 +1339,26 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (!order) {
       return { success: false, error: 'Order not found.' };
+    }
+
+    // Day 30.3: Check if order is part of an active bracket group
+    const matchingBracket = bracketGroupsRef.current.find(bg =>
+      bg.status === 'ACTIVE' &&
+      (bg.parentOrderId === orderId || bg.stopLossOrderId === orderId || bg.targetOrderId === orderId)
+    );
+
+    if (matchingBracket) {
+      const cancelRes = cancelEntryAndChildren(matchingBracket, currentOrders);
+      setOrders(cancelRes.orders);
+      setBracketGroups(prev => prev.map(bg => bg.id === matchingBracket.id ? cancelRes.bracketGroup : bg));
+      addNotification(
+        'ORDER_CANCELLED',
+        'INFO',
+        'Bracket Order Cancelled',
+        `${order.side} ${order.quantity} ${order.symbol} (Bracket group disarmed)`,
+        { symbol: order.symbol, orderId: order.id, route: '/orders' }
+      );
+      return { success: true };
     }
 
     // Enforce state-transition rules: only PENDING → CANCELLED is valid
@@ -1407,6 +1673,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setMarketEvents([]);
     // Day 25: Clear trade journal on reset (scoped to account)
     setTradeJournal([]);
+    // Day 30.3.1: Release bracket persistence guard on intentional reset
+    bracketPersistenceAllowedRef.current = true;
+    // Day 30.3.2: Reset bracket persistence status to AVAILABLE
+    setBracketPersistenceStatus('AVAILABLE');
+    // Day 30.3: Clear bracket groups on reset
+    setBracketGroups([]);
 
     // Clear ALL persisted keys so a page refresh doesn't restore stale data
     localStorage.removeItem('tradelab_account');
@@ -1423,6 +1695,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Day 25: Clear trade journal so previous account's notes cannot leak into
     // a fresh account after reset or switch.
     localStorage.removeItem('tradelab_trade_journal');
+    // Day 30.3: Clear bracket groups from storage
+    localStorage.removeItem(BRACKET_STORAGE_KEY);
     // Note: tradelab_settings is intentionally preserved across resets
 
     // Day 27: Clear any planned order transferred from the position-sizing calculator
@@ -1636,7 +1910,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       holdingsRef.current,
       updatedStocks,
       accountRef.current.realizedPnL,
-      reservedBuyCapital
+      reservedBuyCapital,
+      accountRef.current.startingBalance
     );
     if (
       refreshedAccount.investedValue !== accountRef.current.investedValue ||
@@ -1679,6 +1954,149 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Process pending orders and GTT triggers against the new prices
     processPendingOrdersRef.current();
+
+    // ── Day 30: Evaluate OCO triggers for bracket orders ──
+    // After pending orders are processed, evaluate any active bracket OCO legs
+    bracketGroupsRef.current.forEach(bg => {
+      if (bg.status !== 'ACTIVE') return;
+
+      // Check if entry is executed and children are triggered
+      const parent = ordersRef.current.find(o => o.id === bg.parentOrderId);
+      const slChild = ordersRef.current.find(o => o.id === bg.stopLossOrderId);
+      const tgtChild = ordersRef.current.find(o => o.id === bg.targetOrderId);
+      if (!parent || !slChild || !tgtChild) return;
+
+      // Get current price for this bracket's symbol
+      const stockPrice = updatedStocks.find(s => s.symbol === bg.symbol)?.price;
+      if (!stockPrice || stockPrice <= 0) return;
+
+      // ── Day 30.4: Handle pending LIMIT bracket entries ──
+      // If the entry order is still PENDING (LIMIT not yet met), check the condition
+      if (parent.status === 'PENDING' && parent.type === 'LIMIT') {
+        const limitConditionMet =
+          (parent.side === 'BUY' && stockPrice <= parent.requestedPrice) ||
+          (parent.side === 'SELL' && stockPrice >= parent.requestedPrice);
+
+        if (!limitConditionMet) return;
+
+        // LIMIT condition met — execute the entry order
+        const entryResult = executeOrderInternal(parent, stockPrice);
+
+        // Update parent order to EXECUTED
+        const executedParent: Order = {
+          ...parent,
+          executionPrice: Number(stockPrice.toFixed(2)),
+          totalValue: entryResult.execution.totalValue,
+          status: 'EXECUTED' as OrderStatus,
+          executedAt: entryResult.execution.executedAt,
+        };
+
+        // Activate child exits
+        const activation = activateChildExits(bg, [executedParent, slChild, tgtChild, ...ordersRef.current]);
+        if (!activation.success) {
+          console.warn('[simulateTick] Bracket entry activation failed:', activation.error);
+          return;
+        }
+
+        // Apply entry execution state
+        const updatedOrdersList = ordersRef.current.map(o => {
+          if (o.id === parent.id) return executedParent;
+          if (o.id === bg.stopLossOrderId || o.id === bg.targetOrderId) {
+            const activated = activation.orders.find(a => a.id === o.id);
+            return activated ?? o;
+          }
+          return o;
+        });
+        ordersRef.current = updatedOrdersList;
+        setOrders(updatedOrdersList);
+
+        setExecutions(prev => [entryResult.execution, ...prev]);
+        setTrades(prev => [entryResult.trade, ...prev]);
+        setHoldings(entryResult.newHoldings);
+        holdingsRef.current = entryResult.newHoldings;
+        setAccount(entryResult.newAccount);
+        accountRef.current = entryResult.newAccount;
+
+        addNotification(
+          'ORDER_EXECUTED',
+          'SUCCESS',
+          'Bracket Entry Executed',
+          `${bg.side} ${bg.originalQuantity} ${bg.symbol} LIMIT bracket entry executed at ${formatINR(stockPrice)}.`,
+          { symbol: bg.symbol, orderId: bg.id, route: `/stock/${bg.symbol}` }
+        );
+
+        // Now continue to OCO evaluation with the newly executed parent
+        // (fall through to the OCO check below)
+        return; // OCO evaluation will happen on the next tick
+      }
+
+      // Entry not yet executed — skip OCO evaluation
+      if (parent.status !== 'EXECUTED') return;
+      if (slChild.status !== 'TRIGGERED' && tgtChild.status !== 'TRIGGERED') return;
+
+      // Evaluate which leg triggers
+      const triggerResult = evaluateOCOTriggers(bg, stockPrice);
+      if (triggerResult === 'NONE') return;
+
+      // Determine which leg wins (use tie-breaker for simultaneous triggers)
+      const winningLeg = triggerResult === 'BOTH' ? OCO_TIE_BREAKER : triggerResult;
+
+      // Execute the winning leg using executeOCO
+      const currentOrders = ordersRef.current;
+      const executionResult = executeOCO(
+        bg,
+        currentOrders,
+        holdingsRef.current,
+        tradesRef.current,
+        updatedStocks,
+        accountRef.current,
+        stockPrice,
+        winningLeg // force specific leg for BOTH case (tie-breaker)
+      );
+
+      if (!executionResult.success) {
+        console.warn('[simulateTick] OCO execution failed:', executionResult.error);
+        // Cleanly disarm bracket if underlying position was closed outside the bracket
+        const currentHoldings = holdingsRef.current;
+        const holding = currentHoldings.find(h => h.symbol === bg.symbol);
+        if (bg.side === 'BUY' && (!holding || holding.quantity <= 0)) {
+          const cancelRes = cancelEntryAndChildren(bg, ordersRef.current);
+          setOrders(cancelRes.orders);
+          setBracketGroups(prev => prev.map(b => b.id === bg.id ? cancelRes.bracketGroup : b));
+        }
+        return;
+      }
+
+      // Apply OCO execution results
+      setOrders(prev => prev.map(o => {
+        if (o.id === executionResult.executedOrder.id) return executionResult.executedOrder;
+        if (o.id === executionResult.cancelledOrder.id) return executionResult.cancelledOrder;
+        return o;
+      }));
+      setExecutions(prev => [executionResult.execution, ...prev]);
+      setTrades(prev => [executionResult.trade, ...prev]);
+      setHoldings(executionResult.newHoldings);
+      setAccount(executionResult.newAccount);
+
+      // Update bracket group
+      setBracketGroups(prev =>
+        prev.map(b => b.id === bg.id ? executionResult.updatedBracketGroup : b)
+      );
+
+      // If bracket is completed, we can optionally remove it or keep it as COMPLETED
+      if (executionResult.updatedBracketGroup.status === 'COMPLETED') {
+        // Keep it for history, or remove after some time
+      }
+
+      // Add notification
+      addNotification(
+        'ORDER_EXECUTED',
+        'SUCCESS',
+        'OCO Executed',
+        `${bg.side} bracket OCO executed: ${executionResult.executedLeg}. ${executionResult.realizedPnL >= 0 ? '+' : ''}${formatINR(executionResult.realizedPnL)} P&L.`,
+        { symbol: bg.symbol, orderId: bg.id, route: `/stock/${bg.symbol}` }
+      );
+    });
 
     // Day 24: Log market tick event (throttled by addMarketEvent)
     addMarketEvent('MARKET_TICK', `Tick #${nextTick} processed`);
@@ -1760,7 +2178,11 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updateTradeStrategy,
       // Day 27: Planned order transferred from position-sizing calculator
       plannedOrder,
-      setPlannedOrder
+      setPlannedOrder,
+      // Day 30: Bracket orders
+      bracketGroups,
+      bracketPersistenceStatus,
+      placeBracketOrder
     }}>
       {children}
     </TradingContext.Provider>
