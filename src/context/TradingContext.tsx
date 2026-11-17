@@ -68,6 +68,18 @@ import {
   reconcileBracketState,
   BracketPersistenceStatus
 } from '../engine/BracketRecoveryEngine';
+import {
+  validateTriggerPrices,
+  validateTriggerLimitConsistency,
+  validateGttCreation,
+  evaluateOrderTrigger,
+  computeTrailingUpdate,
+  isGttExpired,
+  canCancelGttOrder,
+  inspectGttOrdersStorage,
+  reconcileGttOrders,
+  GttPersistenceStatus
+} from '../engine/GttOrderEngine';
 
 // ──────────────────────────────────────────────
 // Settings model
@@ -163,6 +175,8 @@ interface TradingContextType {
     symbol: string,
     companyName: string
   ) => { success: boolean; bracketGroup?: BracketGroup; entryOrder?: Order; execution?: Execution; error?: string };
+  // Day 31: GTT order persistence status
+  gttPersistenceStatus: GttPersistenceStatus;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -442,65 +456,24 @@ const validateOrder = (
       : undefined
   );
 
-  // Validate trigger price for STOP / TARGET orders
+  // Day 31: Trigger price validation (centralized in GttOrderEngine)
   if (['STOP_MARKET', 'STOP_LIMIT', 'TARGET'].includes(params.orderType)) {
-    if (effectiveTriggerPrice === undefined || effectiveTriggerPrice === null || effectiveTriggerPrice <= 0) {
-      return { valid: false, error: 'Trigger price must be greater than zero.' };
-    }
-
-    // Logic constraints
-    if (params.orderType === 'STOP_MARKET' || params.orderType === 'STOP_LIMIT') {
-      if (params.side === 'BUY' && effectiveTriggerPrice <= params.currentPrice) {
-        return { valid: false, error: 'Buy Stop trigger must be above current market price.' };
-      }
-      if (params.side === 'SELL' && effectiveTriggerPrice >= params.currentPrice) {
-        return { valid: false, error: 'Sell Stop trigger must be below current market price.' };
-      }
-    }
-    if (params.orderType === 'TARGET') {
-      if (params.side === 'BUY' && effectiveTriggerPrice >= params.currentPrice) {
-        return { valid: false, error: 'Buy Target trigger must be below current market price.' };
-      }
-      if (params.side === 'SELL' && effectiveTriggerPrice <= params.currentPrice) {
-        return { valid: false, error: 'Sell Target trigger must be above current market price.' };
-      }
+    const triggerValidation = validateTriggerPrices(params, effectiveTriggerPrice);
+    if (!triggerValidation.valid) {
+      return triggerValidation;
     }
   }
 
-  // Day 20: GTT validation
-  if (params.isGTT) {
-    if (params.orderType === 'MARKET') {
-      return { valid: false, error: 'GTT cannot be applied to immediate Market orders.' };
-    }
+  // Day 31: Trigger vs limit consistency for STOP_LIMIT orders
+  const consistencyValidation = validateTriggerLimitConsistency(params, effectiveTriggerPrice);
+  if (!consistencyValidation.valid) {
+    return consistencyValidation;
+  }
 
-    if (params.expiry) {
-      const expiryTime = new Date(params.expiry).getTime();
-      if (isNaN(expiryTime)) {
-        return { valid: false, error: 'Invalid expiry date format.' };
-      }
-      if (expiryTime <= Date.now()) {
-        return { valid: false, error: 'Expiry date must be in the future.' };
-      }
-    }
-
-    if (params.trailingConfig) {
-      if (params.side !== 'SELL') {
-        return { valid: false, error: 'Trailing stop-loss is only supported for protective SELL orders on existing holdings.' };
-      }
-      if (!['STOP_MARKET', 'STOP_LIMIT'].includes(params.orderType)) {
-        return { valid: false, error: 'Trailing stop-loss requires a Stop-Market (SL-M) or Stop-Limit (SL-L) order type.' };
-      }
-      const { distance, distanceType } = params.trailingConfig;
-      if (typeof distance !== 'number' || isNaN(distance) || distance <= 0) {
-        return { valid: false, error: 'Trailing distance must be greater than zero.' };
-      }
-      if (distanceType === 'percent' && (distance <= 0 || distance >= 100)) {
-        return { valid: false, error: 'Trailing percent distance must be between 0.1% and 99.9%.' };
-      }
-      if (distanceType === 'absolute' && distance >= params.currentPrice) {
-        return { valid: false, error: 'Trailing distance cannot exceed current market price.' };
-      }
-    }
+  // Day 20/31: GTT validation (centralized in GttOrderEngine)
+  const gttValidation = validateGttCreation(params);
+  if (!gttValidation.valid) {
+    return gttValidation;
   }
 
   // Validate cash for BUY using reservation model
@@ -612,10 +585,36 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [trades, setTrades] = useState<Trade[]>(() => safeLoadJSON('tradelab_trades', []));
 
   // Day 30.3: Recover and reconcile bracket groups and child orders on load
+  // Day 31: Inspect + reconcile persisted orders (including GTT) on load.
+  const orderRecovery = React.useMemo(() => {
+    try {
+      const rawOrders = typeof localStorage !== 'undefined' ? localStorage.getItem('tradelab_orders') : null;
+      const inspection = inspectGttOrdersStorage(rawOrders);
+      const rawExecutions = safeLoadJSON<Execution[]>('tradelab_executions', []);
+      const reconciliation = reconcileGttOrders(inspection.orders, rawExecutions);
+      return {
+        orders: reconciliation.orders,
+        issuesDetected: reconciliation.issuesDetected,
+        allowOrderPersistence: inspection.status === 'missing' || inspection.status === 'valid',
+        orderStorageStatus:
+          inspection.status === 'invalid_records' ? 'INVALID_RECORDS' as const
+            : inspection.status === 'malformed' ? 'MALFORMED' as const
+              : 'AVAILABLE' as const,
+      };
+    } catch {
+      return {
+        orders: [] as Order[],
+        issuesDetected: ['Order storage initialization failed'],
+        allowOrderPersistence: false,
+        orderStorageStatus: 'MALFORMED' as const,
+      };
+    }
+  }, []);
+
   // Day 30.3.1: Use inspectBracketStorage to distinguish valid vs protected storage
   const initialReconciliation = React.useMemo(() => {
     try {
-      const rawOrders = safeLoadJSON<Order[]>('tradelab_orders', []);
+      const rawOrders = orderRecovery.orders;
       const rawHoldings = safeLoadJSON<Holding[]>('tradelab_holdings', []);
 
       const rawBracketStorage =
@@ -646,15 +645,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch {
       return {
         reconciledGroups: [] as BracketGroup[],
-        reconciledOrders: safeLoadJSON<Order[]>('tradelab_orders', []),
+        reconciledOrders: orderRecovery.orders,
         issuesDetected: ['Bracket storage initialization failed'],
         allowBracketPersistence: false,
         recoveryIssue: 'invalid_envelope' as const,
       };
     }
-  }, []);
+  }, [orderRecovery]);
 
-  const [orders, setOrders] = useState<Order[]>(() => initialReconciliation.reconciledOrders);
+  const [orders, setOrders] = useState<Order[]>(() => orderRecovery.orders);
   const [executions, setExecutions] = useState<Execution[]>(() => safeLoadJSON('tradelab_executions', []));
   const [stocks, setStocks] = useState<StockData[]>(() => safeLoadJSON<StockData[]>('tradelab_stocks', MOCK_STOCKS));
   const [stockHistory, setStockHistory] = useState<Record<string, ChartDataPoint[]>>(() => {
@@ -691,6 +690,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (initialReconciliation.recoveryIssue === 'malformed') return 'MALFORMED';
     return 'INVALID_ENVELOPE';
   });
+  // Day 31: GTT order persistence guard — prevents overwriting protected order storage
+  const gttPersistenceAllowedRef = React.useRef(orderRecovery.allowOrderPersistence);
+  // Day 31: GTT order persistence status state (reactive for UI consumers)
+  const [gttPersistenceStatus, setGttPersistenceStatus] = useState<GttPersistenceStatus>(() => orderRecovery.orderStorageStatus);
   const [autoSimActive, setAutoSimActive] = useState(false);
 
   // ── Portfolio Snapshots (Day 21) ──
@@ -854,7 +857,17 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => { localStorage.setItem('tradelab_watchlist', JSON.stringify(watchlist)); }, [watchlist]);
   useEffect(() => { localStorage.setItem('tradelab_holdings', JSON.stringify(holdings)); }, [holdings]);
   useEffect(() => { localStorage.setItem('tradelab_trades', JSON.stringify(trades)); }, [trades]);
-  useEffect(() => { localStorage.setItem('tradelab_orders', JSON.stringify(orders)); }, [orders]);
+  // Day 31: Guarded order persistence — skip write when storage contains invalid/malformed data
+  useEffect(() => {
+    if (!gttPersistenceAllowedRef.current) {
+      return;
+    }
+    try {
+      localStorage.setItem('tradelab_orders', JSON.stringify(orders));
+    } catch {
+      // Safe fallback if storage quota exceeded or unavailable
+    }
+  }, [orders]);
   useEffect(() => { localStorage.setItem('tradelab_executions', JSON.stringify(executions)); }, [executions]);
   useEffect(() => { localStorage.setItem('tradelab_stocks', JSON.stringify(stocks)); }, [stocks]);
   useEffect(() => { localStorage.setItem('tradelab_stock_history', JSON.stringify(stockHistory)); }, [stockHistory]);
@@ -1018,6 +1031,24 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // ── placeOrder — central order creation ──
 
   const placeOrder = useCallback((params: PlaceOrderParams): PlaceOrderResult => {
+    // Day 31.2: GTT creation protection guard — when persisted order storage
+    // cannot be safely loaded (malformed/invalid records), reject new GTT orders
+    // before creating or executing them. Without this guard a GTT order would
+    // appear successful in memory and silently vanish after reload (data loss),
+    // because the guarded persistence effect below skips writing orders.
+    if (params.isGTT && !gttPersistenceAllowedRef.current) {
+      const errorMsg =
+        'GTT orders are temporarily disabled because stored order data could not be safely loaded. Reset the account to re-enable GTT persistence.';
+      addNotification(
+        'ORDER_REJECTED',
+        'WARNING',
+        'GTT Orders Disabled',
+        errorMsg,
+        { symbol: params.symbol, route: '/settings' }
+      );
+      return { success: false, error: errorMsg };
+    }
+
     const currentStocks = stocksRef.current;
     const currentAccount = accountRef.current;
     const currentHoldings = holdingsRef.current;
@@ -1361,11 +1392,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: true };
     }
 
-    // Enforce state-transition rules: only PENDING → CANCELLED is valid
-    if (!isValidTransition(order.status, 'CANCELLED')) {
+    // Day 31.1: GTT-aware cancellation policy.
+    // Non-GTT orders retain the Day 11 rule: only PENDING → CANCELLED.
+    // GTT orders (PENDING or TRIGGERED) may be cancelled safely since no execution has occurred.
+    // Terminal states are never cancellable.
+    const cancelCheck = canCancelGttOrder(order);
+    if (!cancelCheck.allowed) {
       return {
         success: false,
-        error: 'Invalid cancel. Orders in ' + order.status + ' state cannot be cancelled.'
+        error: cancelCheck.reason ?? `Invalid cancel. Orders in ${order.status} state cannot be cancelled.`
       };
     }
 
@@ -1421,117 +1456,62 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // Check current status in local working array (not just the snapshot)
       const orderIdx = updatedOrders.findIndex(o => o.id === order.id);
       if (orderIdx < 0) continue;
-      const currentState = { ...updatedOrders[orderIdx] };
+      let currentState = { ...updatedOrders[orderIdx] };
       if (currentState.status !== 'PENDING' && currentState.status !== 'TRIGGERED') continue;
 
-      // Day 20: Expiry check — reject Good-Till-Date orders that have expired
-      if (currentState.isGTT && currentState.expiry) {
-        const expiryTime = new Date(currentState.expiry).getTime();
-        const now = Date.now();
-        if (now > expiryTime) {
-          // Order expired — reject it cleanly
-          updatedOrders[orderIdx] = {
-            ...currentState,
-            status: 'REJECTED' as OrderStatus,
-            rejectionReason: 'Order has expired.',
-            executedAt: null,
-          };
-          addNotification(
-            'ORDER_REJECTED',
-            'ERROR',
-            'Order Expired',
-            `${currentState.side} ${currentState.quantity} ${currentState.symbol} — order has expired.`,
-            { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
-          );
-          processedIds.add(currentState.id);
-          rejected++;
-          continue;
-        }
+      // Day 31.1: Expiry check (centralized in GttOrderEngine)
+      if (isGttExpired(currentState)) {
+        // Order expired — reject it cleanly
+        updatedOrders[orderIdx] = {
+          ...currentState,
+          status: 'REJECTED' as OrderStatus,
+          rejectionReason: 'Order has expired.',
+          executedAt: null,
+        };
+        addNotification(
+          'ORDER_REJECTED',
+          'ERROR',
+          'Order Expired',
+          `${currentState.side} ${currentState.quantity} ${currentState.symbol} — order has expired.`,
+          { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
+        );
+        processedIds.add(currentState.id);
+        rejected++;
+        continue;
       }
 
       const stock = currentStocks.find(s => s.symbol === currentState.symbol);
       if (!stock) continue;
       const currentPrice = stock.price;
 
-      // Day 20: Update trailing stop trigger price (only in favorable direction)
+      // Day 31.1: Trailing stop update (centralized in GttOrderEngine)
       if (currentState.isGTT && currentState.trailingConfig) {
-        const { distance, distanceType } = currentState.trailingConfig;
-        const side = currentState.side;
-
-        if (side === 'SELL') {
-          // Reference peak: highest price observed since order creation
-          const peak = currentState.highestPriceSinceCreation ?? currentPrice;
-          if (currentPrice > peak) {
-            // Price made a new high! Advance reference peak and recalculate trigger upward only
-            const newPeak = currentPrice;
-            const newTrigger = distanceType === 'percent'
-              ? Number((newPeak * (1 - distance / 100)).toFixed(2))
-              : Number((newPeak - distance).toFixed(2));
-
-            const prevTrigger = currentState.triggerPrice ?? 0;
-            if (newTrigger > prevTrigger) {
-              currentState.highestPriceSinceCreation = newPeak;
-              currentState.triggerPrice = newTrigger;
-              updatedOrders[orderIdx] = {
-                ...updatedOrders[orderIdx],
-                highestPriceSinceCreation: newPeak,
-                triggerPrice: newTrigger
-              };
-            }
-          }
-          // If currentPrice <= peak: price fell or remained flat, peak and trigger stay unchanged
-        } else if (side === 'BUY') {
-          // Fallback if BUY trailing stop is ever used
-          const trough = currentState.lowestPriceSinceCreation ?? currentPrice;
-          if (currentPrice < trough) {
-            // Price made a new low! Advance reference trough and recalculate trigger downward only
-            const newTrough = currentPrice;
-            const newTrigger = distanceType === 'percent'
-              ? Number((newTrough * (1 + distance / 100)).toFixed(2))
-              : Number((newTrough + distance).toFixed(2));
-
-            const prevTrigger = currentState.triggerPrice ?? Infinity;
-            if (newTrigger < prevTrigger) {
-              currentState.lowestPriceSinceCreation = newTrough;
-              currentState.triggerPrice = newTrigger;
-              updatedOrders[orderIdx] = {
-                ...updatedOrders[orderIdx],
-                lowestPriceSinceCreation: newTrough,
-                triggerPrice: newTrigger
-              };
-            }
-          }
+        const trailing = computeTrailingUpdate(currentState, currentPrice);
+        if (trailing.updated) {
+          currentState = {
+            ...currentState,
+            highestPriceSinceCreation: trailing.newHighestPrice ?? currentState.highestPriceSinceCreation,
+            lowestPriceSinceCreation: trailing.newLowestPrice ?? currentState.lowestPriceSinceCreation,
+            triggerPrice: trailing.newTriggerPrice ?? currentState.triggerPrice,
+          };
+          updatedOrders[orderIdx] = currentState;
         }
       }
 
-      // 1. Evaluate Conditions
-      let conditionMet = false;
-      let newStatus: OrderStatus | null = null;
-
-      if (currentState.status === 'PENDING') {
-        if (currentState.type === 'LIMIT') {
-          if (currentState.side === 'BUY' && currentPrice <= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
-          if (currentState.side === 'SELL' && currentPrice >= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
-        } else if (currentState.type === 'STOP_MARKET') {
-          if (currentState.side === 'BUY' && currentPrice >= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
-          if (currentState.side === 'SELL' && currentPrice <= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
-        } else if (currentState.type === 'TARGET') {
-          if (currentState.side === 'BUY' && currentPrice <= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
-          if (currentState.side === 'SELL' && currentPrice >= currentState.triggerPrice!) { conditionMet = true; newStatus = 'EXECUTED'; }
-        } else if (currentState.type === 'STOP_LIMIT') {
-          if (currentState.side === 'BUY' && currentPrice >= currentState.triggerPrice!) { conditionMet = true; newStatus = 'TRIGGERED'; }
-          if (currentState.side === 'SELL' && currentPrice <= currentState.triggerPrice!) { conditionMet = true; newStatus = 'TRIGGERED'; }
-        }
-      } else if (currentState.status === 'TRIGGERED' && currentState.type === 'STOP_LIMIT') {
-        if (currentState.side === 'BUY' && currentPrice <= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
-        if (currentState.side === 'SELL' && currentPrice >= currentState.requestedPrice) { conditionMet = true; newStatus = 'EXECUTED'; }
-      }
-
-      if (!conditionMet || !newStatus) continue;
+      // Day 31.1: Evaluate trigger conditions (centralized in GttOrderEngine)
+      const trigger = evaluateOrderTrigger(currentState, currentPrice);
+      if (!trigger.met || !trigger.nextStatus) continue;
+      const newStatus = trigger.nextStatus;
 
       // 2. If it's just transitioning to TRIGGERED (STOP_LIMIT)
       if (newStatus === 'TRIGGERED') {
-        updatedOrders[orderIdx] = { ...currentState, status: 'TRIGGERED' };
+        // Day 31.1: Record triggeredAt once on the PENDING → TRIGGERED transition.
+        // Preserve an existing value if one somehow exists (idempotent).
+        updatedOrders[orderIdx] = {
+          ...currentState,
+          status: 'TRIGGERED',
+          triggeredAt: currentState.triggeredAt ?? new Date().toISOString(),
+        };
         addNotification(
           'ORDER_TRIGGERED',
           'WARNING',
@@ -1677,6 +1657,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     bracketPersistenceAllowedRef.current = true;
     // Day 30.3.2: Reset bracket persistence status to AVAILABLE
     setBracketPersistenceStatus('AVAILABLE');
+    // Day 31: Release GTT order persistence guard on intentional reset
+    gttPersistenceAllowedRef.current = true;
+    setGttPersistenceStatus('AVAILABLE');
     // Day 30.3: Clear bracket groups on reset
     setBracketGroups([]);
 
@@ -2182,7 +2165,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // Day 30: Bracket orders
       bracketGroups,
       bracketPersistenceStatus,
-      placeBracketOrder
+      placeBracketOrder,
+      // Day 31: GTT persistence status
+      gttPersistenceStatus
     }}>
       {children}
     </TradingContext.Provider>

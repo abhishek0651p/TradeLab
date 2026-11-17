@@ -84,6 +84,8 @@ export interface Order {
   trailingConfig?: TrailingStopConfig; // Trailing stop configuration
   highestPriceSinceCreation?: number; // For trailing SELL stop: highest price observed
   lowestPriceSinceCreation?: number;  // For trailing BUY stop: lowest price observed
+  // Day 31: GTT lifecycle tracking
+  triggeredAt?: string | null;        // Timestamp when order transitioned to TRIGGERED state
 }
 
 export interface TrailingStopConfig {

@@ -63,7 +63,8 @@ const Settings = () => {
     tick,
     resetAccount,
     updateSettings,
-    bracketPersistenceStatus
+    bracketPersistenceStatus,
+    gttPersistenceStatus
   } = useTrading();
 
   const [resetConfirmStep, setResetConfirmStep] = useState<0 | 1 | 2>(0);
@@ -407,6 +408,37 @@ const Settings = () => {
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary, #94a3b8)' }}>
                     Resetting your virtual account below is <strong>destructive</strong>: it will permanently discard all account state, holdings, orders, and the incompatible stored bracket data, allowing normal bracket persistence to resume.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Day 31: GTT Order Storage Protection Warning */}
+            {gttPersistenceStatus !== 'AVAILABLE' && (
+              <div
+                className="d15-confirm-box"
+                style={{
+                  marginBottom: '16px',
+                  borderColor: 'var(--warning, #f59e0b)',
+                  background: 'rgba(245, 158, 11, 0.08)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '14px 16px',
+                  borderRadius: '8px'
+                }}
+              >
+                <AlertTriangle size={20} color="var(--warning, #f59e0b)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  <strong style={{ color: 'var(--warning, #f59e0b)', fontSize: '0.95rem' }}>
+                    GTT Storage Protected ({gttPersistenceStatus.toLowerCase().replace('_', ' ')})
+                  </strong>
+                  <p style={{ margin: '4px 0 6px 0', fontSize: '0.875rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                    GTT orders are temporarily disabled because existing stored order data contains records that could not be safely loaded.
+                    New GTT orders cannot be placed while protection is active. Standard market and limit orders remain fully usable.
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                    Resetting your virtual account below is <strong>destructive</strong>: it will permanently discard all account state, holdings, orders, executions, trade history, and the incompatible stored order data, allowing normal GTT persistence to resume.
                   </p>
                 </div>
               </div>
