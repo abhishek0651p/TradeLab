@@ -14,8 +14,43 @@ export const isTerminalStatus = (status: OrderStatus): boolean => {
 };
 
 /** Check if an order is eligible for reservation (pending or triggered). */
-export const isReservationEligible = (status: OrderStatus): boolean => {
-  return status === 'PENDING' || status === 'TRIGGERED';
+export const isReservationEligible = (status: OrderStatus): boolean =>
+  status === 'PENDING' || status === 'TRIGGERED' || status === 'PARTIALLY_FILLED';
+
+/** Derive the effective filled quantity from an order, with backward compatibility.
+ *  Historical EXECUTED orders (filledQuantity/remainingQuantity absent) are treated as fully filled.
+ *  PARTIALLY_FILLED orders use filledQuantity/remainingQuantity if present.
+ *  Pending orders with no partial tracking start with 0 filled.
+ */
+export const getEffectiveFilledQuantity = (order: Order): number => {
+  // If explicitly set, use it (clamped to quantity range).
+  if (order.filledQuantity !== undefined) {
+    return Math.max(0, Math.min(order.quantity, order.filledQuantity));
+  }
+  // Historical EXECUTED orders without new fields are treated as fully filled.
+  if (order.status === 'EXECUTED') {
+    return order.quantity;
+  }
+  // Pending orders with no partial tracking start with 0 filled.
+  return 0;
+};
+
+/** Derive the effective remaining quantity from an order, with backward compatibility.
+ *  For PARTIALLY_FILLED: uses remainingQuantity if present, else quantity - filledQuantity.
+ *  For historical EXECUTED: remaining = 0.
+ *  For PENDING: remaining = quantity (nothing filled yet).
+ */
+export const getEffectiveRemainingQuantity = (order: Order): number => {
+  if (order.status === 'EXECUTED') {
+    return 0;
+  }
+  // If explicitly tracked, use remainingQuantity (clamped).
+  if (order.remainingQuantity !== undefined) {
+    return Math.max(0, order.remainingQuantity);
+  }
+  // Derived from filledQuantity when absent: remaining = quantity - filledQuantity.
+  const filled = getEffectiveFilledQuantity(order);
+  return Math.max(0, order.quantity - filled);
 };
 
 /**
@@ -72,19 +107,23 @@ export const computeOrderBuyReservation = (order: Order, stocks: StockData[]): n
   const reservationPrice = getReservationPrice(order, stock.price);
   if (reservationPrice === null) return 0;
 
-  return Number((reservationPrice * order.quantity).toFixed(2));
+  // Reserve only for the remaining unfilled quantity so reserved capital is not spent twice.
+  const effectiveRemaining = getEffectiveRemainingQuantity(order);
+  return Number((reservationPrice * effectiveRemaining).toFixed(2));
 };
 
 /**
  * Compute the quantity reserved by a single eligible pending SELL order.
  * Returns 0 if the order is not a SELL, not eligible, or symbol doesn't match.
+ * Uses effective remaining quantity for consistent reservation semantics.
  */
 export const computeOrderSellReservation = (order: Order, symbol: string): number => {
   if (order.side !== 'SELL') return 0;
   if (!isReservationEligible(order.status)) return 0;
   if (order.symbol !== symbol) return 0;
 
-  return order.quantity;
+  const effectiveRemaining = getEffectiveRemainingQuantity(order);
+  return effectiveRemaining;
 };
 
 /**
@@ -134,6 +173,45 @@ export const computeAvailableSellQuantity = (
 ): number => {
   const available = totalHoldingQuantity - reservedSellQuantity;
   return Math.max(0, available);
+};
+
+/** Determine the quantity of a BUY order that can be filled given current cash/resources.
+ *  Limited by available buying power after other reservations, and by the order's effective remaining.
+ */
+export const computeExecutableBuyQuantity = (
+  order: Order,
+  executionPrice: number,
+  cashBalance: number,
+  orders: Order[],
+  stocks: StockData[]
+): number => {
+  const remaining = getEffectiveRemainingQuantity(order);
+  if (remaining <= 0 || executionPrice <= 0) return 0;
+
+  const otherOrders = orders.filter(o => o.id !== order.id);
+  const reservedByOthers = computeReservedBuyCapital(otherOrders, stocks);
+  const available = computeAvailableBuyingPower(cashBalance, reservedByOthers);
+  const affordable = Math.floor(available / executionPrice);
+  return Math.max(0, Math.min(remaining, affordable));
+};
+
+/** Determine the quantity of a SELL order that can be filled given current holdings/resources.
+ *  Limited by available holdings after other reservations, and by the order's effective remaining.
+ */
+export const computeExecutableSellQuantity = (
+  order: Order,
+  holdings: Holding[],
+  orders: Order[]
+): number => {
+  const remaining = getEffectiveRemainingQuantity(order);
+  if (remaining <= 0) return 0;
+
+  const otherOrders = orders.filter(o => o.id !== order.id);
+  const reservedByOthers = computeReservedSellQuantity(otherOrders, order.symbol);
+  const holding = holdings.find(h => h.symbol === order.symbol);
+  const totalHoldingQty = holding ? holding.quantity : 0;
+  const available = computeAvailableSellQuantity(totalHoldingQty, reservedByOthers);
+  return Math.max(0, Math.min(remaining, available));
 };
 
 /**
@@ -297,8 +375,10 @@ export const revalidateOrderAtExecution = (
     const reservedBuyCapital = computeReservedBuyCapital(otherOrders, stocks);
     const availableBuyingPower = computeAvailableBuyingPower(cashBalance, reservedBuyCapital);
 
+    // Use effective remaining quantity so partial fills don't get double-reserved.
     const reservationPrice = getReservationPrice(order, stock.price) ?? stock.price;
-    const requiredCash = Number((reservationPrice * order.quantity).toFixed(2));
+    const effectiveRemaining = getEffectiveRemainingQuantity(order);
+    const requiredCash = Number((reservationPrice * effectiveRemaining).toFixed(2));
 
     if (requiredCash > availableBuyingPower) {
       return {
@@ -314,7 +394,9 @@ export const revalidateOrderAtExecution = (
     const totalHoldingQty = holding ? holding.quantity : 0;
     const availableQty = computeAvailableSellQuantity(totalHoldingQty, reservedSellQty);
 
-    if (order.quantity > availableQty) {
+    // Use effective remaining quantity so partial fills don't get double-reserved.
+    const effectiveRemaining = getEffectiveRemainingQuantity(order);
+    if (effectiveRemaining > availableQty) {
       return {
         valid: false,
         reason: `Insufficient holdings at execution. You own ${totalHoldingQty} shares of ${order.symbol} but ${reservedSellQty} share${reservedSellQty !== 1 ? 's' : ''} ${reservedSellQty === 1 ? 'is' : 'are'} committed to other pending SELL orders. Available: ${availableQty}.`

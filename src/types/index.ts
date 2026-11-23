@@ -1,6 +1,6 @@
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'STOP_LIMIT' | 'TARGET';
-export type OrderStatus = 'PENDING' | 'TRIGGERED' | 'EXECUTED' | 'CANCELLED' | 'REJECTED';
+export type OrderStatus = 'PENDING' | 'TRIGGERED' | 'EXECUTED' | 'CANCELLED' | 'REJECTED' | 'PARTIALLY_FILLED';
 
 export type NotificationType =
   | 'ORDER_EXECUTED'
@@ -33,6 +33,21 @@ export interface Holding {
   averageBuyPrice: number;
 }
 
+/** Transaction cost breakdown (shared across Order, Execution, and Trade).
+ *  All fields optional for backward compatibility with historical records.
+ *  Phase A: Data model only — no calculation logic yet.
+ */
+export interface TransactionCosts {
+  brokerage?: number;
+  stt?: number;
+  exchangeTransactionCharges?: number;
+  gst?: number;
+  sebiCharges?: number;
+  stampDuty?: number;
+  otherCharges?: number;
+  totalCharges?: number;
+}
+
 export interface Trade {
   id: string;
   timestamp: string;
@@ -48,6 +63,10 @@ export interface Trade {
   orderType?: OrderType;
   // Day 25: User-entered strategy label (optional, leaves undefined for execution-created trades)
   strategy?: string;
+  // Day 32: Transaction cost breakdown (optional, backward compatible)
+  charges?: TransactionCosts;
+  // Day 32 Phase D: Net financial impact including transaction costs
+  netValue?: number;
 }
 
 // Day 25: Trade Journal entry
@@ -78,6 +97,15 @@ export interface Order {
   cancelledAt: string | null;
   rejectionReason: string | null;
 
+  // Day 32: Partial-fill tracking (optional, backward compatible)
+  filledQuantity?: number;       // Quantity executed so far; undefined means 0 or full fill
+  remainingQuantity?: number;   // Quantity still to fill; undefined means quantity (no partial fill)
+
+  // Day 32: Transaction cost breakdown (optional, backward compatible)
+  charges?: TransactionCosts;
+  // Day 32 Phase D: Net financial impact including transaction costs
+  netValue?: number;
+
   // Day 20: GTT / Conditional order extensions
   isGTT?: boolean;                    // Good-Till-Triggered flag
   expiry?: string | null;             // ISO timestamp for Good-Till-Date; null = Good-Till-Cancelled
@@ -86,6 +114,48 @@ export interface Order {
   lowestPriceSinceCreation?: number;  // For trailing BUY stop: lowest price observed
   // Day 31: GTT lifecycle tracking
   triggeredAt?: string | null;        // Timestamp when order transitioned to TRIGGERED state
+
+  // Day 32 Phase E: Order modification audit trail, versioning and execution priority
+  orderVersion?: number;              // Monotonically increasing revision counter (starts at 1)
+  modifiedAt?: string | null;         // Timestamp of latest modification
+  modificationCount?: number;         // Total number of successful modifications
+  modificationHistory?: OrderModificationRecord[]; // Immutable audit log of all modifications
+  priorityTimestamp?: number;         // Epoch timestamp used for FIFO queue execution priority
+}
+
+export interface OrderModificationRecord {
+  timestamp: string;
+  previousQuantity: number;
+  newQuantity: number;
+  previousRequestedPrice: number;
+  newRequestedPrice: number;
+  previousTriggerPrice?: number;
+  newTriggerPrice?: number;
+  previousRemainingQuantity: number;
+  newRemainingQuantity: number;
+  reason?: string;
+  orderVersion: number;
+}
+
+export interface ModifyOrderParams {
+  orderId: string;
+  quantity?: number;         // New total order quantity (must be >= filledQuantity)
+  price?: number;            // New limit / requested price
+  triggerPrice?: number;     // New trigger price (for STOP_LIMIT or GTT)
+  reason?: string;           // Optional user or strategy modification reason
+  expectedVersion?: number;  // Optional optimistic lock / version check
+}
+
+export interface ModifyOrderResult {
+  success: boolean;
+  error?: string;
+  order?: Order;
+  validationDetails?: {
+    additionalCapitalRequired?: number;
+    additionalHoldingsRequired?: number;
+    excessCapitalReleased?: number;
+    excessHoldingsReleased?: number;
+  };
 }
 
 export interface TrailingStopConfig {
@@ -100,10 +170,15 @@ export interface Execution {
   symbol: string;
   companyName: string;
   side: OrderSide;
-  quantity: number;
+  quantity: number;             // Quantity filled in this individual execution
   executionPrice: number;
   totalValue: number;
   executedAt: string;
+  // Day 32: Transaction cost breakdown (optional, backward compatible)
+  // Multiple executions may belong to one order; each execution is an independent fill.
+  charges?: TransactionCosts;
+  // Day 32 Phase D: Net financial impact including transaction costs
+  netValue?: number;
 }
 
 export interface PlaceOrderParams {

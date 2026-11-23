@@ -347,7 +347,7 @@ const cumulativePnLTooltip = ({ active, payload }: any) => {
    ──────────────────────────────────────────────── */
 
 const TradeHistory: React.FC = () => {
-  const { trades, updateTradeStrategy, tradeJournal } = useTrading();
+  const { trades, updateTradeStrategy, tradeJournal, transactionCostAnalytics } = useTrading();
 
   const [pnlFilter, setPnlFilter] = useState<PnLFilter>('ALL');
   const [sideFilter, setSideFilter] = useState<SideFilter>('ALL');
@@ -620,6 +620,15 @@ const TradeHistory: React.FC = () => {
                 {formatSignedCurrency(stats.totalRealizedPnL)}
               </div>
             </div>
+            <div className="card trades-stat-card">
+              <div className="trades-stat-label">Total Transaction Charges</div>
+              <div className="trades-stat-value" style={{ color: '#f59e0b' }}>
+                {transactionCostAnalytics.totalCharges > 0 ? formatCurrency(transactionCostAnalytics.totalCharges) : '₹0'}
+              </div>
+              <div className="trades-stat-sub">
+                BUY: {formatCurrency(transactionCostAnalytics.buySideCharges)} | SELL: {formatCurrency(transactionCostAnalytics.sellSideCharges)}
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -880,6 +889,7 @@ const TradeHistory: React.FC = () => {
                     <th style={{ textAlign: 'right' }}>Qty</th>
                     <th style={{ textAlign: 'right' }}>Exec. Price</th>
                     <th style={{ textAlign: 'right' }}>Total Value</th>
+                    <th style={{ textAlign: 'right' }}>Charges</th>
                     <th style={{ textAlign: 'right' }}>Realized P&L</th>
                     <th style={{ textAlign: 'right' }}>P&L %</th>
                     <th>Strategy</th>
@@ -922,6 +932,9 @@ const TradeHistory: React.FC = () => {
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{trade.quantity}</td>
                         <td style={{ textAlign: 'right' }}>{formatCurrency(trade.executionPrice)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(trade.totalValue)}</td>
+                        <td style={{ textAlign: 'right', color: trade.charges?.totalCharges ? '#f59e0b' : 'inherit' }}>
+                          {trade.charges?.totalCharges ? formatCurrency(trade.charges.totalCharges) : '—'}
+                        </td>
                         <td style={{ textAlign: 'right' }}>
                           {hasPnL ? (
                             <span

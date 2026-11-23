@@ -22,6 +22,7 @@ const OrderAnalytics: React.FC<OrderAnalyticsProps> = ({ orders, executions }) =
     const sellCount = orders.filter(o => o.side === 'SELL').length;
     const totalExecutedValue = executions.reduce((sum, e) => sum + e.totalValue, 0);
     const totalExecQty = executions.reduce((sum, e) => sum + e.quantity, 0);
+    const totalCharges = executions.reduce((sum, e) => sum + (e.charges?.totalCharges ?? 0), 0);
     const avgExecPrice = totalExecQty > 0
       ? executions.reduce((sum, e) => sum + e.executionPrice * e.quantity, 0) / totalExecQty
       : 0;
@@ -29,7 +30,7 @@ const OrderAnalytics: React.FC<OrderAnalyticsProps> = ({ orders, executions }) =
     const typeCounts: Record<string, number> = { MARKET: 0, LIMIT: 0, STOP_MARKET: 0, STOP_LIMIT: 0, TARGET: 0 };
     orders.forEach(o => { typeCounts[o.type] = (typeCounts[o.type] || 0) + 1; });
 
-    return { totalOrders, openCount, executedCount, rejectedCount, cancelledCount, executionRate, buyCount, sellCount, totalExecutedValue, avgExecPrice, typeCounts };
+    return { totalOrders, openCount, executedCount, rejectedCount, cancelledCount, executionRate, buyCount, sellCount, totalExecutedValue, totalCharges, avgExecPrice, typeCounts };
   }, [orders, executions]);
 
   return (
@@ -71,6 +72,12 @@ const OrderAnalytics: React.FC<OrderAnalyticsProps> = ({ orders, executions }) =
         <div className="d17-analytics-label">Total Executed Value</div>
         <div className="d17-analytics-value">
           {stats.totalExecutedValue > 0 ? formatCurrency(stats.totalExecutedValue) : '—'}
+        </div>
+      </div>
+      <div className="card d17-analytics-card">
+        <div className="d17-analytics-label">Total Charges</div>
+        <div className="d17-analytics-value" style={{ color: '#f59e0b' }}>
+          {stats.totalCharges > 0 ? formatCurrency(stats.totalCharges) : '₹0'}
         </div>
       </div>
       <div className="card d17-analytics-card">

@@ -13,7 +13,7 @@ export const isGttTerminalStatus = (status: OrderStatus): boolean => GTT_TERMINA
 
 /** Check if a GTT order is eligible for triggering/execution (PENDING or TRIGGERED). */
 export const isGttEligibleForTrigger = (status: OrderStatus): boolean =>
-  status === 'PENDING' || status === 'TRIGGERED';
+  status === 'PENDING' || status === 'TRIGGERED' || status === 'PARTIALLY_FILLED';
 
 /**
  * Result of trigger condition evaluation.
@@ -47,8 +47,25 @@ export const evaluateOrderTrigger = (
     return { met: false, nextStatus: null, reason: 'Invalid trigger price' };
   }
 
-  // PENDING orders: check if trigger condition is met
-  if (order.status === 'PENDING') {
+  // PENDING orders: check if trigger condition is met.
+  // PARTIALLY_FILLED orders are re-evaluated so the remaining quantity can fill on subsequent ticks.
+  if (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED') {
+    // For PARTIALLY_FILLED STOP_LIMIT orders, we already triggered previously (triggeredAt set),
+    // so only the limit condition needs to be checked.
+    if (type === 'STOP_LIMIT' && order.status === 'PARTIALLY_FILLED') {
+      if (side === 'BUY' && currentPrice <= requestedPrice) {
+        return { met: true, nextStatus: 'EXECUTED', reason: 'Buy stop-limit limit price reached' };
+      }
+      if (side === 'SELL' && currentPrice >= requestedPrice) {
+        return { met: true, nextStatus: 'EXECUTED', reason: 'Sell stop-limit limit price reached' };
+      }
+      return { met: false, nextStatus: null };
+    }
+
+    if (type === 'MARKET') {
+      return { met: true, nextStatus: 'EXECUTED', reason: 'Market order execution' };
+    }
+
     if (type === 'LIMIT') {
       if (side === 'BUY' && currentPrice <= requestedPrice) {
         return { met: true, nextStatus: 'EXECUTED', reason: 'Buy limit price reached' };
@@ -386,7 +403,7 @@ export const isValidPersistedOrder = (v: unknown): v is Order => {
   if (typeof o.requestedPrice !== 'number' || !Number.isFinite(o.requestedPrice) || o.requestedPrice < 0) return false;
   if (o.triggerPrice !== undefined && o.triggerPrice !== null &&
       (typeof o.triggerPrice !== 'number' || !Number.isFinite(o.triggerPrice) || o.triggerPrice <= 0)) return false;
-  if (!['PENDING', 'TRIGGERED', 'EXECUTED', 'CANCELLED', 'REJECTED'].includes(o.status as string)) return false;
+  if (!['PENDING', 'TRIGGERED', 'EXECUTED', 'CANCELLED', 'REJECTED', 'PARTIALLY_FILLED'].includes(o.status as string)) return false;
   if (typeof o.createdAt !== 'string') return false;
 
   // GTT-specific field validation
@@ -515,9 +532,9 @@ export const reconcileGttOrders = (
       continue;
     }
 
-    // Check if this order has an execution record but isn't EXECUTED
+    // Check if this order has an execution record but isn't EXECUTED or PARTIALLY_FILLED
     if (executionOrderIds.has(order.id)) {
-      if (order.status !== 'EXECUTED') {
+      if (order.status !== 'EXECUTED' && order.status !== 'PARTIALLY_FILLED') {
         issuesDetected.push(`Order ${order.id} has execution record but status=${order.status}; marking EXECUTED`);
         reconciledOrder = {
           ...reconciledOrder,

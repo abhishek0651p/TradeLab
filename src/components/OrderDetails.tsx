@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Clock,
   ArrowUpRight,
@@ -14,8 +14,13 @@ import {
   FileText,
   Ban,
   RefreshCw,
+  Edit3,
+  History,
+  Save,
+  X
 } from 'lucide-react';
 import type { Order } from '../types';
+import { useTrading } from '../context/TradingContext';
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(value);
@@ -41,8 +46,63 @@ interface OrderDetailsProps {
 }
 
 const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCancel }) => {
+  const { modifyOrder, bracketGroups } = useTrading();
   const isTerminal = ['EXECUTED', 'CANCELLED', 'REJECTED'].includes(order.status);
   const isPending = order.status === 'PENDING';
+  const filledQty = order.filledQuantity ?? 0;
+  const remainingQty = order.remainingQuantity ?? (order.quantity - filledQty);
+
+  // Check if order belongs to an active bracket group
+  const isBracketChildOrParent = bracketGroups.some(
+    bg =>
+      bg.status === 'ACTIVE' &&
+      (bg.parentOrderId === order.id || bg.stopLossOrderId === order.id || bg.targetOrderId === order.id)
+  );
+  const isModifiable = (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED') && !isBracketChildOrParent;
+
+  const [isModifying, setIsModifying] = useState(false);
+  const [modQty, setModQty] = useState(String(order.quantity));
+  const [modPrice, setModPrice] = useState(String(order.requestedPrice));
+  const [modTriggerPrice, setModTriggerPrice] = useState(String(order.triggerPrice ?? ''));
+  const [modReason, setModReason] = useState('');
+  const [modError, setModError] = useState<string | null>(null);
+
+  const handleStartModify = () => {
+    setModQty(String(order.quantity));
+    setModPrice(String(order.requestedPrice));
+    setModTriggerPrice(String(order.triggerPrice ?? ''));
+    setModReason('');
+    setModError(null);
+    setIsModifying(true);
+  };
+
+  const handleCancelModify = () => {
+    setIsModifying(false);
+    setModError(null);
+  };
+
+  const handleSubmitModify = (e: React.FormEvent) => {
+    e.preventDefault();
+    setModError(null);
+    const parsedQty = Number(modQty);
+    const parsedPrice = Number(modPrice);
+    const parsedTrigger = modTriggerPrice.trim() ? Number(modTriggerPrice) : undefined;
+
+    const res = modifyOrder({
+      orderId: order.id,
+      quantity: !isNaN(parsedQty) && parsedQty !== order.quantity ? parsedQty : undefined,
+      price: !isNaN(parsedPrice) && parsedPrice !== order.requestedPrice ? parsedPrice : undefined,
+      triggerPrice: parsedTrigger !== undefined && parsedTrigger !== order.triggerPrice ? parsedTrigger : undefined,
+      reason: modReason.trim() ? modReason.trim() : undefined,
+      expectedVersion: order.orderVersion ?? 1,
+    });
+
+    if (res.success) {
+      setIsModifying(false);
+    } else {
+      setModError(res.error ?? 'Failed to modify order.');
+    }
+  };
 
   return (
     <div className="d17-order-details">
@@ -72,9 +132,25 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCanc
           <span className="d17-detail-value"><Tag size={14} /> {order.type.replace('_', ' ')}</span>
         </div>
         <div className="d17-detail-item">
-          <span className="d17-detail-label">Quantity</span>
+          <span className="d17-detail-label">Total Quantity</span>
           <span className="d17-detail-value"><Package size={14} /> {order.quantity}</span>
         </div>
+        {filledQty > 0 && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Filled Quantity</span>
+            <span className="d17-detail-value text-success">{filledQty}</span>
+          </div>
+        )}
+        <div className="d17-detail-item">
+          <span className="d17-detail-label">Remaining Quantity</span>
+          <span className="d17-detail-value font-semibold">{remainingQty}</span>
+        </div>
+        {(order.orderVersion ?? 1) > 1 && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Revision</span>
+            <span className="d17-detail-value text-primary">Rev #{order.orderVersion} ({order.modificationCount} mod{(order.modificationCount ?? 0) > 1 ? 's' : ''})</span>
+          </div>
+        )}
         <div className="d17-detail-item">
           <span className="d17-detail-label">Requested Price</span>
           <span className="d17-detail-value">
@@ -132,6 +208,18 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCanc
             <span className="d17-detail-value">{formatCurrency(order.totalValue)}</span>
           </div>
         )}
+        {order.netValue !== null && order.netValue !== undefined && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Net Value ({order.side === 'BUY' ? 'Total Cost' : 'Net Proceeds'})</span>
+            <span className="d17-detail-value font-semibold text-primary">{formatCurrency(order.netValue)}</span>
+          </div>
+        )}
+        {order.charges && (order.charges.totalCharges ?? 0) > 0 && (
+          <div className="d17-detail-item">
+            <span className="d17-detail-label">Total Charges</span>
+            <span className="d17-detail-value" style={{ color: '#f59e0b' }}>{formatCurrency(order.charges.totalCharges ?? 0)}</span>
+          </div>
+        )}
         {order.isGTT && (
           <div className="d17-detail-item">
             <span className="d17-detail-label">Mechanism</span>
@@ -175,6 +263,34 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCanc
           </div>
         )}
       </div>
+
+      {/* ── Transaction Costs Breakdown (Day 32 Phase D) ── */}
+      {order.charges && (order.charges.totalCharges ?? 0) > 0 && (
+        <div className="d17-charges-card" style={{
+          margin: '12px 0 16px 0',
+          padding: '14px',
+          borderRadius: '8px',
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid rgba(255, 255, 255, 0.08)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 600 }}>
+              Transaction Charges Breakdown
+            </span>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#f59e0b' }}>
+              {formatCurrency(order.charges.totalCharges ?? 0)}
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', fontSize: '12px' }}>
+            <div><span style={{ color: '#94a3b8' }}>Brokerage:</span> <strong>{formatCurrency(order.charges.brokerage ?? 0)}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>STT:</span> <strong>{formatCurrency(order.charges.stt ?? 0)}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>Exchange:</span> <strong>{formatCurrency(order.charges.exchangeTransactionCharges ?? 0)}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>GST (18%):</span> <strong>{formatCurrency(order.charges.gst ?? 0)}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>SEBI:</span> <strong>{formatCurrency(order.charges.sebiCharges ?? 0)}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>Stamp Duty:</span> <strong>{formatCurrency(order.charges.stampDuty ?? 0)}</strong></div>
+          </div>
+        </div>
+      )}
 
       {/* ── Lifecycle Timeline ── */}
       <div className="d17-lifecycle">
@@ -254,12 +370,176 @@ const OrderDetails: React.FC<OrderDetailsProps> = ({ order, currentPrice, onCanc
       </div>
 
       {/* ── Contextual Actions ── */}
-      {isPending && onCancel && (
-        <div className="d17-actions">
+      <div className="d17-actions" style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+        {isModifiable && !isModifying && (
+          <button
+            className="d17-action-btn"
+            style={{
+              background: 'rgba(59, 130, 246, 0.15)',
+              color: '#60a5fa',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              padding: '6px 14px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              fontWeight: 500
+            }}
+            onClick={handleStartModify}
+          >
+            <Edit3 size={15} />
+            Modify Order
+          </button>
+        )}
+        {(isPending || order.status === 'PARTIALLY_FILLED') && onCancel && (
           <button className="d17-action-btn d17-action-cancel" onClick={() => onCancel(order.id)}>
             <XCircle size={16} />
             Cancel Order
           </button>
+        )}
+      </div>
+
+      {/* ── Order Modification Form (Day 32 Phase E) ── */}
+      {isModifying && (
+        <form onSubmit={handleSubmitModify} className="d17-modify-card" style={{
+          marginTop: '16px',
+          padding: '16px',
+          borderRadius: '8px',
+          background: 'rgba(255, 255, 255, 0.04)',
+          border: '1px solid rgba(59, 130, 246, 0.4)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Edit3 size={16} className="text-primary" /> Modify Order Parameters
+            </span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+              Current Rev #{order.orderVersion ?? 1}
+            </span>
+          </div>
+
+          {modError && (
+            <div style={{ padding: '8px 12px', marginBottom: '12px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', color: '#fca5a5', fontSize: '12px' }}>
+              {modError}
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                Total Quantity {filledQty > 0 ? `(Filled: ${filledQty}, Min: ${filledQty})` : ''}
+              </label>
+              <input
+                type="number"
+                min={filledQty > 0 ? filledQty : 1}
+                value={modQty}
+                onChange={e => setModQty(e.target.value)}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', fontSize: '13px' }}
+                required
+              />
+            </div>
+
+            {order.type !== 'MARKET' && (
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                  Limit Price (₹)
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.05"
+                  value={modPrice}
+                  onChange={e => setModPrice(e.target.value)}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', fontSize: '13px' }}
+                  required
+                />
+              </div>
+            )}
+
+            {(order.type === 'STOP_LIMIT' || order.type === 'STOP_MARKET' || order.isGTT) && (
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                  Trigger Price (₹)
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.05"
+                  value={modTriggerPrice}
+                  onChange={e => setModTriggerPrice(e.target.value)}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', fontSize: '13px' }}
+                />
+              </div>
+            )}
+
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                Reason (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Adjusted target"
+                value={modReason}
+                onChange={e => setModReason(e.target.value)}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', fontSize: '13px' }}
+              />
+            </div>
+          </div>
+
+          {/* Live Preview */}
+          <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(0, 0, 0, 0.25)', fontSize: '11px', color: '#cbd5e1', marginBottom: '12px' }}>
+            <span>New Remaining Qty: <strong>{Math.max(0, Number(modQty) - filledQty)}</strong></span>
+            <span style={{ margin: '0 8px' }}>•</span>
+            <span>New Remaining Value: <strong>{formatCurrency(Math.max(0, Number(modQty) - filledQty) * Number(modPrice || order.requestedPrice))}</strong></span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={handleCancelModify}
+              className="d17-action-btn"
+              style={{ background: '#334155', color: '#f8fafc', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+            >
+              <X size={14} /> Cancel
+            </button>
+            <button
+              type="submit"
+              className="d17-action-btn"
+              style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 600 }}
+            >
+              <Save size={14} /> Save Modification
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* ── Order Modification Audit History (Day 32 Phase E) ── */}
+      {order.modificationHistory && order.modificationHistory.length > 0 && (
+        <div className="d17-mod-history" style={{ marginTop: '16px', padding: '14px', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
+            <History size={14} className="text-primary" /> Modification Audit History ({order.modificationHistory.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+            {order.modificationHistory.map((rec, idx) => (
+              <div key={idx} style={{ padding: '6px 10px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <span style={{ fontWeight: 600, color: '#38bdf8' }}>Rev #{rec.orderVersion}: </span>
+                  <span>Qty {rec.previousQuantity} → {rec.newQuantity}</span>
+                  {rec.previousRequestedPrice !== rec.newRequestedPrice && (
+                    <span>, Price {formatCurrency(rec.previousRequestedPrice)} → {formatCurrency(rec.newRequestedPrice)}</span>
+                  )}
+                  {rec.previousTriggerPrice !== rec.newTriggerPrice && rec.newTriggerPrice && (
+                    <span>, Trigger {formatCurrency(rec.previousTriggerPrice ?? 0)} → {formatCurrency(rec.newTriggerPrice)}</span>
+                  )}
+                  {rec.reason && <span style={{ color: '#94a3b8' }}> ({rec.reason})</span>}
+                </div>
+                <div style={{ color: '#64748b' }}>
+                  {formatDateTime(rec.timestamp)}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

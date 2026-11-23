@@ -12,6 +12,7 @@ import SupportResistancePanel from '../components/SupportResistancePanel';
 import PositionIntelligence from '../components/PositionIntelligence';
 import TradePlanningPanel from '../components/TradePlanningPanel';
 import StockComparison from '../components/StockComparison';
+import { calculateTransactionCosts, calculateNetExecutionValue } from '../engine/TransactionCostEngine';
 
 type Timeframe = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y';
 
@@ -169,6 +170,24 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
 
   const effectivePrice = orderType === 'MARKET' ? price : (['LIMIT', 'STOP_LIMIT'].includes(orderType) ? limitPriceNum : (triggerPriceNum > 0 ? triggerPriceNum : price));
   const estimatedValue = isQuantityValid ? effectivePrice * quantityNum : 0;
+
+  // Day 32 Phase D: Estimated transaction charges preview
+  const estCharges = useMemo(() => {
+    if (!isQuantityValid || effectivePrice <= 0 || quantityNum <= 0) return null;
+    return calculateTransactionCosts({
+      side,
+      quantity: quantityNum,
+      price: effectivePrice,
+    });
+  }, [side, quantityNum, effectivePrice, isQuantityValid]);
+
+  const estNetValue = useMemo(() => {
+    if (!estCharges) return estimatedValue;
+    return calculateNetExecutionValue(
+      { side, quantity: quantityNum, price: effectivePrice, totalValue: estimatedValue },
+      estCharges
+    );
+  }, [side, quantityNum, effectivePrice, estimatedValue, estCharges]);
 
   const canSubmit = isQuantityValid && isLimitPriceValid && isTriggerPriceValid && isExpiryValid && isTrailingDistanceValid;
 
@@ -526,9 +545,21 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ symbol, companyName, pri
                 <strong>{formatCurr(price)}</strong>
               </div>
               <div className="order-summary-row">
-                <span>Estimated Value</span>
-                <strong style={{ color: sideColor }}>{formatCurrShort(estimatedValue)}</strong>
+                <span>Estimated Gross Value</span>
+                <strong>{formatCurrShort(estimatedValue)}</strong>
               </div>
+              {estCharges && (
+                <div className="order-summary-row">
+                  <span>Est. Transaction Charges</span>
+                  <strong style={{ color: '#f59e0b' }}>{formatCurrShort(estCharges.totalCharges)}</strong>
+                </div>
+              )}
+              {estCharges && (
+                <div className="order-summary-row">
+                  <span>{side === 'BUY' ? 'Est. Total Outflow' : 'Est. Net Inflow'}</span>
+                  <strong style={{ color: sideColor }}>{formatCurrShort(estNetValue)}</strong>
+                </div>
+              )}
 
               {isGTT && (
                 <>

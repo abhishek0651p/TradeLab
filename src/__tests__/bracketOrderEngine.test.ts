@@ -160,6 +160,39 @@ describe('computeAccountMetrics starting balance', () => {
     const account = computeAccountMetrics(1000, [], stocksAt(2500), 0, 123456.78, 0);
     expect(account.startingBalance).toBe(123456.78);
   });
+
+  it('Day 32 cleanup: computes metrics correctly with default reservedBuyCapital (5 arguments)', () => {
+    const holdings: Holding[] = [{ symbol: 'RELIANCE', quantity: 10, averageBuyPrice: 2500 }];
+    const account = computeAccountMetrics(
+      100000,
+      holdings,
+      stocksAt(2600),
+      500,
+      100000
+    );
+    expect(account.startingBalance).toBe(100000);
+    expect(account.cashBalance).toBe(100000);
+    expect(account.investedValue).toBe(25000);
+    expect(account.portfolioValue).toBe(126000); // cash 100k + market value 26k
+    expect(account.unrealizedPnL).toBe(1000); // 26k - 25k
+    expect(account.realizedPnL).toBe(500);
+  });
+
+  it('Day 32 cleanup: computes metrics with explicit reservedBuyCapital (6 arguments)', () => {
+    const holdings: Holding[] = [{ symbol: 'RELIANCE', quantity: 10, averageBuyPrice: 2500 }];
+    const account = computeAccountMetrics(
+      100000,
+      holdings,
+      stocksAt(2600),
+      500,
+      100000,
+      15000 // reserved buy capital
+    );
+    expect(account.startingBalance).toBe(100000);
+    expect(account.cashBalance).toBe(100000);
+    expect(account.investedValue).toBe(25000);
+    expect(account.portfolioValue).toBe(126000);
+  });
 });
 
 describe('bracket entry accounting', () => {

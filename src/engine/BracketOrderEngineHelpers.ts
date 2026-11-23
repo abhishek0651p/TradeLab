@@ -5,6 +5,7 @@ Never mutates React state.
 
 import { Holding, StockData, AccountState } from '../types';
 import { computePortfolioSummaryMetrics } from './TradingAccounting';
+import { computeHoldingAverageBuyPriceWithCosts } from './TransactionCostEngine';
 
 /** ID generators (mirroring TradingContext) */
 export const generateOrderId = (): string =>
@@ -20,16 +21,17 @@ export const generateNotificationId = (): string =>
   'NOT-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
 
 /** Compute holdings after BUY execution */
-export const computeBuyHoldings = (prevHoldings: Holding[], symbol: string, quantity: number, price: number): Holding[] => {
+export const computeBuyHoldings = (prevHoldings: Holding[], symbol: string, quantity: number, price: number, charges: number = 0): Holding[] => {
   const existing = prevHoldings.find(h => h.symbol === symbol);
   if (existing) {
     const newQty = existing.quantity + quantity;
-    const newAvg = ((existing.averageBuyPrice * existing.quantity) + (price * quantity)) / newQty;
+    const newAvg = computeHoldingAverageBuyPriceWithCosts(existing.averageBuyPrice, existing.quantity, quantity, price, charges);
     return prevHoldings.map(h =>
       h.symbol === symbol ? { ...h, quantity: newQty, averageBuyPrice: Number(newAvg.toFixed(2)) } : h
     );
   }
-  return [...prevHoldings, { symbol, quantity, averageBuyPrice: Number(price.toFixed(2)) }];
+  const initialAvg = computeHoldingAverageBuyPriceWithCosts(0, 0, quantity, price, charges);
+  return [...prevHoldings, { symbol, quantity, averageBuyPrice: Number(initialAvg.toFixed(2)) }];
 };
 
 /** Compute holdings after SELL execution */

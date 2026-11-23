@@ -18,6 +18,12 @@ import {
 } from '../types';
 import { computeBuyHoldings, computeSellHoldings, computeAccountMetrics } from './BracketOrderEngineHelpers';
 import { revalidateOrderAtExecution } from './ReservationModel';
+import {
+  TransactionCostConfig,
+  calculateTransactionCosts,
+  calculateNetExecutionValue,
+  computeRealizedPnLWithCosts,
+} from './TransactionCostEngine';
 
 /** Terminal order statuses. */
 const TERMINAL_STATUSES: readonly OrderStatus[] = ['EXECUTED', 'CANCELLED', 'REJECTED'];
@@ -100,7 +106,8 @@ export const executeOCO = (
   stocks: StockData[],
   account: AccountState,
   executionPrice: number,
-  forcedLeg?: 'STOP_LOSS' | 'TARGET'
+  forcedLeg?: 'STOP_LOSS' | 'TARGET',
+  costConfig?: TransactionCostConfig
 ): OCOExecutionStateChange => {
   const now = new Date().toISOString();
   const side = bracketGroup.side;
@@ -239,8 +246,29 @@ export const executeOCO = (
     executedAt: now,
   };
 
-  // Compute realized P&L
+  // Day 32 Phase D: Calculate transaction costs if costConfig is provided and enabled
   const executedQty = winningOrder.quantity;
+  const charges = (costConfig && costConfig.enabled !== false)
+    ? calculateTransactionCosts(
+        { side: winningOrder.side, quantity: executedQty, price: executionPrice },
+        costConfig,
+        winningOrder.charges
+      )
+    : undefined;
+
+  const netValue = charges
+    ? calculateNetExecutionValue(
+        { side: winningOrder.side, quantity: executedQty, price: executionPrice, totalValue: execution.totalValue },
+        charges
+      )
+    : execution.totalValue;
+
+  if (charges) {
+    execution.charges = charges;
+    execution.netValue = netValue;
+  }
+
+  // Compute realized P&L
   let realizedGain = 0;
 
   if (winningOrder.side === 'SELL') {
@@ -248,28 +276,32 @@ export const executeOCO = (
     const existingHolding = holdings.find(h => h.symbol === winningOrder.symbol);
     if (existingHolding) {
       const costBasis = existingHolding.averageBuyPrice * executedQty;
-      realizedGain = execution.totalValue - costBasis;
+      realizedGain = charges
+        ? computeRealizedPnLWithCosts(execution.totalValue, charges.totalCharges, costBasis)
+        : execution.totalValue - costBasis;
     }
   } else {
     // BUY leg: closing a short position (SELL bracket)
     // Short was opened at bracketGroup.entryPrice, closed at executionPrice.
     // P&L = entry proceeds - exit cost = (entryPrice - executionPrice) * qty
     const entryProceeds = bracketGroup.entryPrice * executedQty;
-    realizedGain = entryProceeds - execution.totalValue;
+    realizedGain = charges
+      ? entryProceeds - (execution.totalValue + charges.totalCharges)
+      : entryProceeds - execution.totalValue;
   }
 
   // Update holdings
   let newHoldings: Holding[];
   if (winningOrder.side === 'BUY') {
-    newHoldings = computeBuyHoldings(holdings, winningOrder.symbol, executedQty, executionPrice);
+    newHoldings = computeBuyHoldings(holdings, winningOrder.symbol, executedQty, executionPrice, charges?.totalCharges ?? 0);
   } else {
     newHoldings = computeSellHoldings(holdings, winningOrder.symbol, executedQty);
   }
 
   // Update cash
   const newCash = winningOrder.side === 'BUY'
-    ? account.cashBalance - execution.totalValue
-    : account.cashBalance + execution.totalValue;
+    ? account.cashBalance - (execution.totalValue + (charges?.totalCharges ?? 0))
+    : account.cashBalance + (execution.totalValue - (charges?.totalCharges ?? 0));
 
   // Update reserved buy capital (excluding the winning order since it's executed)
   const otherOrders = orders.filter(o => o.id !== winningOrder.id);
@@ -306,6 +338,8 @@ export const executeOCO = (
     orderId: winningOrder.id,
     executionId: execution.id,
     orderType: winningOrder.type,
+    charges,
+    netValue,
   };
 
   // Update winning order to EXECUTED
@@ -315,6 +349,8 @@ export const executeOCO = (
     totalValue: execution.totalValue,
     status: 'EXECUTED' as OrderStatus,
     executedAt: now,
+    charges,
+    netValue,
   };
 
   // Update losing order to CANCELLED

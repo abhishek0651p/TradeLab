@@ -13,7 +13,7 @@ Setup:
 ────────────────────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { useTrading, TradingProvider } from '../context/TradingContext';
 import { MOCK_STOCKS } from '../data/mockData';
 import type { PlaceOrderParams } from '../types';
@@ -67,7 +67,10 @@ describe('Day 31.2 — GTT creation protection guard (TradingProvider integratio
 
     const { result } = renderProvider();
 
-    const res = result.current.placeOrder(gttBuyLimitParams());
+    let res!: ReturnType<typeof result.current.placeOrder>;
+    act(() => {
+      res = result.current.placeOrder(gttBuyLimitParams());
+    });
 
     expect(res.success).toBe(false);
     expect(res.error).toContain('GTT orders are temporarily disabled');
@@ -87,7 +90,10 @@ describe('Day 31.2 — GTT creation protection guard (TradingProvider integratio
     // tradelab_orders absent -> status 'missing' -> allowOrderPersistence true
     const { result } = renderProvider();
 
-    const res = result.current.placeOrder(gttBuyLimitParams());
+    let res!: ReturnType<typeof result.current.placeOrder>;
+    act(() => {
+      res = result.current.placeOrder(gttBuyLimitParams());
+    });
 
     expect(res.success).toBe(true);
     expect(res.order?.isGTT).toBe(true);
@@ -104,7 +110,10 @@ describe('Day 31.2 — GTT creation protection guard (TradingProvider integratio
     const beforeOrders = result.current.orders.length;
     const beforeExecutions = result.current.executions.length;
 
-    const res = result.current.placeOrder(marketBuyParams());
+    let res!: ReturnType<typeof result.current.placeOrder>;
+    act(() => {
+      res = result.current.placeOrder(marketBuyParams());
+    });
 
     await waitFor(() => expect(result.current.orders.length).toBe(beforeOrders + 1));
 
@@ -121,7 +130,10 @@ describe('Day 31.2 — GTT creation protection guard (TradingProvider integratio
 
     const beforeOrders = result.current.orders.length;
 
-    const res = result.current.placeOrder(limitBuyParams());
+    let res!: ReturnType<typeof result.current.placeOrder>;
+    act(() => {
+      res = result.current.placeOrder(limitBuyParams());
+    });
 
     await waitFor(() => expect(result.current.orders.length).toBe(beforeOrders + 1));
 
@@ -143,7 +155,10 @@ describe('Day 31.2 — GTT creation protection guard (TradingProvider integratio
       trades: result.current.trades.length,
     };
 
-    const res = result.current.placeOrder(gttBuyLimitParams());
+    let res!: ReturnType<typeof result.current.placeOrder>;
+    act(() => {
+      res = result.current.placeOrder(gttBuyLimitParams());
+    });
 
     expect(res.success).toBe(false);
     expect(res.order).toBeUndefined();
@@ -160,7 +175,9 @@ describe('Day 31.2 — GTT creation protection guard (TradingProvider integratio
 
     const { result } = renderProvider();
 
-    result.current.placeOrder(gttBuyLimitParams());
+    act(() => {
+      result.current.placeOrder(gttBuyLimitParams());
+    });
 
     await waitFor(() => expect(result.current.notifications.length).toBe(1));
     const notification = result.current.notifications[0];

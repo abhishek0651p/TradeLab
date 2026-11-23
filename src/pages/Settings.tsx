@@ -94,6 +94,10 @@ const Settings = () => {
     updateSettings({ notificationsEnabled: !settings.notificationsEnabled });
   };
 
+  const handleToggleTransactionCosts = () => {
+    updateSettings({ transactionCostsEnabled: !settings.transactionCostsEnabled });
+  };
+
   /* ── CSV export handlers ── */
 
   const handleExportTrades = useCallback(() => {
@@ -102,7 +106,7 @@ const Settings = () => {
       setTimeout(() => setExportFeedback(null), 3000);
       return;
     }
-    const headers = ['ID', 'Timestamp', 'Symbol', 'Company', 'Side', 'Order Type', 'Quantity', 'Price', 'Total Value', 'Realized P&L'];
+    const headers = ['ID', 'Timestamp', 'Symbol', 'Company', 'Side', 'Order Type', 'Quantity', 'Price', 'Total Value', 'Charges', 'Net Value', 'Realized P&L'];
     const rows = trades.map(t => [
       t.id,
       t.timestamp,
@@ -113,6 +117,8 @@ const Settings = () => {
       String(t.quantity),
       String(t.executionPrice),
       String(t.totalValue),
+      t.charges?.totalCharges !== undefined ? String(t.charges.totalCharges) : '',
+      t.netValue !== undefined ? String(t.netValue) : '',
       t.realizedPnL !== null ? String(t.realizedPnL) : ''
     ]);
     downloadCSV('tradelab-trades.csv', headers, rows);
@@ -325,6 +331,56 @@ const Settings = () => {
             >
               <span className="d15-toggle-thumb" />
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════
+          Section 2.7: Transaction Costs & Charges (Day 32 Phase D)
+          ═══════════════════════════════════════════════ */}
+      <div className="d15-section">
+        <div className="d15-section-header">
+          <Activity size={20} />
+          <h2>Transaction Costs & Charges</h2>
+        </div>
+
+        <div className="d15-card">
+          <div className="d15-setting-row">
+            <div className="d15-setting-info">
+              <div className="d15-setting-label">Simulate Realistic Transaction Charges</div>
+              <p className="d15-setting-desc">
+                Simulate standard Indian equity statutory and exchange fees (Brokerage, STT, Exchange Turnover, GST, SEBI, Stamp Duty) on orders and portfolio P&L.
+              </p>
+            </div>
+            <button
+              className={`d15-toggle ${settings.transactionCostsEnabled ? 'd15-toggle-on' : ''}`}
+              onClick={handleToggleTransactionCosts}
+              aria-label="Toggle transaction costs simulation"
+            >
+              <span className="d15-toggle-thumb" />
+            </button>
+          </div>
+
+          <div style={{
+            marginTop: '16px',
+            padding: '14px',
+            borderRadius: '8px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            fontSize: '12px',
+            lineHeight: 1.6
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)' }}>
+              Standard Delivery Indicative Schedule (NSE Equity)
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+              <div><strong>Brokerage:</strong> 0.03% or ₹20 (whichever lower)</div>
+              <div><strong>STT:</strong> 0.1% on BUY & SELL turnover</div>
+              <div><strong>Exchange:</strong> 0.00345% turnover charge</div>
+              <div><strong>GST:</strong> 18% on (Brokerage + Exchange + SEBI)</div>
+              <div><strong>SEBI Charges:</strong> ₹10 per crore (0.0001%)</div>
+              <div><strong>Stamp Duty:</strong> 0.015% on BUY side</div>
+            </div>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   AccountState,
   OrderSide,
@@ -23,7 +23,10 @@ import {
   ReplayState,
   ReplaySpeed,
   TradeJournalEntry,
-  PlannedOrder
+  PlannedOrder,
+  TransactionCosts,
+  ModifyOrderParams,
+  ModifyOrderResult
 } from '../types';
 import {
   INITIAL_ACCOUNT_STATE,
@@ -47,6 +50,9 @@ import {
   validateBracketOrder,
 } from '../engine/BracketOrderEngine';
 import {
+  computeAccountMetrics,
+} from '../engine/BracketOrderEngineHelpers';
+import {
   evaluateOCOTriggers,
   executeOCO,
   OCO_TIE_BREAKER,
@@ -58,7 +64,12 @@ import {
   computeReservedBuyCapital,
   validateBuyOrderReservation,
   validateSellOrderReservation,
-  revalidateOrderAtExecution
+  getEffectiveRemainingQuantity,
+  getEffectiveFilledQuantity,
+  computeExecutableBuyQuantity,
+  computeExecutableSellQuantity,
+  revalidateOrderAtExecution,
+  isTerminalStatus
 } from '../engine/ReservationModel';
 import {
   BRACKET_STORAGE_KEY,
@@ -80,6 +91,30 @@ import {
   reconcileGttOrders,
   GttPersistenceStatus
 } from '../engine/GttOrderEngine';
+import {
+  computeAvailableTickLiquidity,
+  computeLiquidityConstrainedQuantity,
+  computeSlippage,
+  applyOrderTypePriceProtection
+} from '../engine/LiquidityEngine';
+import {
+  TransactionCostConfig,
+  DEFAULT_TRANSACTION_COST_CONFIG,
+  calculateTransactionCosts,
+  calculateTotalCharges,
+  calculateNetExecutionValue,
+  aggregateOrderCharges,
+  computeHoldingAverageBuyPriceWithCosts,
+  computeRealizedPnLWithCosts,
+  calculateTransactionCostAnalytics,
+  TransactionCostAnalytics,
+  TransactionCostInput
+} from '../engine/TransactionCostEngine';
+import {
+  validateOrderModification,
+  applyOrderModification,
+  sortOrdersByPriority
+} from '../engine/OrderModificationEngine';
 
 // ──────────────────────────────────────────────
 // Settings model
@@ -90,13 +125,16 @@ export interface TradingSettings {
   autoSimIntervalSec: number;   // 1–60 seconds
   showPnlPercent: boolean;      // show % alongside ₹ values
   notificationsEnabled: boolean; // Day 16: toggle non-critical notifications
+  // Day 32 Phase D: Transaction cost simulation toggle
+  transactionCostsEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: TradingSettings = {
   autoSimEnabled: false,
   autoSimIntervalSec: 10,
   showPnlPercent: true,
-  notificationsEnabled: true
+  notificationsEnabled: true,
+  transactionCostsEnabled: true
 };
 
 const AUTO_SIM_MIN_SEC = 1;
@@ -177,6 +215,11 @@ interface TradingContextType {
   ) => { success: boolean; bracketGroup?: BracketGroup; entryOrder?: Order; execution?: Execution; error?: string };
   // Day 31: GTT order persistence status
   gttPersistenceStatus: GttPersistenceStatus;
+  // Day 32 Phase D: Transaction cost analytics and configuration
+  transactionCostAnalytics: TransactionCostAnalytics;
+  transactionCostConfig: TransactionCostConfig;
+  // Day 32 Phase E: Advanced order modification
+  modifyOrder: (params: ModifyOrderParams) => ModifyOrderResult;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -241,34 +284,9 @@ const revalidateExecution = (
 
 // ──────────────────────────────────────────────
 // Pure helper: compute account metrics (standardized accounting)
+// Imported from BracketOrderEngineHelpers to ensure unified implementation
+// and consistent parameter ordering across the engine.
 // ──────────────────────────────────────────────
-
-const computeAccountMetrics = (
-  cashBalance: number,
-  newHoldings: Holding[],
-  stocksList: StockData[],
-  prevRealizedPnL: number,
-  reservedBuyCapital: number = 0,
-  startingBalance: number = INITIAL_ACCOUNT_STATE.startingBalance
-): AccountState => {
-  const accounting = computePortfolioSummaryMetrics(
-    cashBalance,
-    newHoldings,
-    stocksList,
-    reservedBuyCapital,
-    []
-  )
-
-  return {
-    startingBalance,
-    cashBalance,
-    investedValue: accounting.costBasis,
-    portfolioValue: accounting.portfolioEquity,
-    // Carry forward accumulated realized PnL (previous trades + current gain)
-    realizedPnL: prevRealizedPnL,
-    unrealizedPnL: accounting.unrealizedPnL
-  }
-}
 
 // ──────────────────────────────────────────────
 // Portfolio aggregation helpers (centralized)
@@ -952,25 +970,57 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // ── Internal order execution (shared by market orders and pending-order processing) ──
 
+  // Day 32 Phase D: Derive active transaction cost config from settings
+  const activeTransactionCostConfig: TransactionCostConfig = useMemo(() => ({
+    ...DEFAULT_TRANSACTION_COST_CONFIG,
+    enabled: settings.transactionCostsEnabled
+  }), [settings.transactionCostsEnabled]);
+
   const executeOrderInternal = useCallback((
     order: Order,
-    executionPrice: number
-  ): { execution: Execution; trade: Trade; newAccount: AccountState; newHoldings: Holding[] } => {
+    executionPrice: number,
+    executedQuantity?: number
+  ): { execution: Execution; trade: Trade; newAccount: AccountState; newHoldings: Holding[]; filledQuantity: number; remainingQuantity: number; charges: Required<TransactionCosts> } => {
     const now = new Date().toISOString();
     const prevHoldings = holdingsRef.current;
     const currentAccount = accountRef.current;
 
-    // Create execution
+    // Determine the quantity to fill: defaults to full order quantity for backward compatibility.
+    const fillQty = executedQuantity ?? order.quantity;
+    const effectiveRemaining = getEffectiveRemainingQuantity(order);
+    // Clamp fill quantity to effective remaining (safety).
+    const clampedFillQty = Math.min(fillQty, effectiveRemaining);
+
+    // Cumulative tracking: this execution adds to any previously filled quantity.
+    const prevFilled = getEffectiveFilledQuantity(order);
+    const filledQuantity = prevFilled + clampedFillQty;
+    const remainingQuantity = Math.max(0, effectiveRemaining - clampedFillQty);
+
+    // Day 32 Phase D: Calculate transaction costs for this fill.
+    const costInput: TransactionCostInput = {
+      side: order.side,
+      quantity: clampedFillQty,
+      price: executionPrice
+    };
+    const charges = calculateTransactionCosts(
+      costInput,
+      activeTransactionCostConfig,
+      order.charges // existing cumulative charges for partial-fill brokerage cap
+    );
+    const netValue = calculateNetExecutionValue(costInput, charges);
+
+    // Create execution — each execution represents only the quantity filled during this execution.
     const execution: Execution = {
       id: generateExecutionId(),
       orderId: order.id,
       symbol: order.symbol,
       companyName: order.companyName,
       side: order.side,
-      quantity: order.quantity,
+      quantity: clampedFillQty, // This execution's filled quantity only
       executionPrice: Number(executionPrice.toFixed(2)),
-      totalValue: Number((executionPrice * order.quantity).toFixed(2)),
-      executedAt: now
+      totalValue: Number((executionPrice * clampedFillQty).toFixed(2)),
+      executedAt: now,
+      charges
     };
 
     let newHoldings: Holding[];
@@ -978,16 +1028,34 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let realizedGain = 0;
 
     if (order.side === 'BUY') {
-      newHoldings = computeBuyHoldings(prevHoldings, order.symbol, order.quantity, executionPrice);
-      newCash = currentAccount.cashBalance - execution.totalValue;
-    } else {
-      // SELL
+      // Day 32 Phase D: Include BUY charges in cost basis via weighted-average buy price.
+      // newAvg = ((prevAvg * prevQty) + (price * addedQty) + buyCharges) / (prevQty + addedQty)
       const existingHolding = prevHoldings.find(h => h.symbol === order.symbol);
-      const costBasis = existingHolding ? existingHolding.averageBuyPrice * order.quantity : 0;
-      realizedGain = execution.totalValue - costBasis;
+      const prevAvg = existingHolding ? existingHolding.averageBuyPrice : 0;
+      const prevQty = existingHolding ? existingHolding.quantity : 0;
+      const newAvgBuyPrice = computeHoldingAverageBuyPriceWithCosts(
+        prevAvg, prevQty, clampedFillQty, executionPrice, charges.totalCharges
+      );
+      const newQty = prevQty + clampedFillQty;
+      if (existingHolding) {
+        newHoldings = prevHoldings.map(h =>
+          h.symbol === order.symbol ? { ...h, quantity: newQty, averageBuyPrice: newAvgBuyPrice } : h
+        );
+      } else {
+        newHoldings = [...prevHoldings, { symbol: order.symbol, quantity: newQty, averageBuyPrice: newAvgBuyPrice }];
+      }
+      // Deduct gross execution value + total charges from cash.
+      newCash = currentAccount.cashBalance - execution.totalValue - charges.totalCharges;
+    } else {
+      // SELL: Net realized P&L = (grossSaleValue - sellCharges) - costBasis
+      const existingHolding = prevHoldings.find(h => h.symbol === order.symbol);
+      const costBasis = existingHolding ? existingHolding.averageBuyPrice * clampedFillQty : 0;
+      realizedGain = computeRealizedPnLWithCosts(execution.totalValue, charges.totalCharges, costBasis);
 
-      newHoldings = computeSellHoldings(prevHoldings, order.symbol, order.quantity);
-      newCash = currentAccount.cashBalance + execution.totalValue;
+      // Reduce holdings only by executed quantity.
+      newHoldings = computeSellHoldings(prevHoldings, order.symbol, clampedFillQty);
+      // Credit net sale proceeds (gross - charges) to cash.
+      newCash = currentAccount.cashBalance + execution.totalValue - charges.totalCharges;
     }
 
     // Defensive: ensure cash never goes negative (should be caught by validation, but belt-and-suspenders)
@@ -1005,28 +1073,30 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       newHoldings,
       stocksRef.current,
       currentAccount.realizedPnL + realizedGain,
-      reservedBuyCapital,
-      currentAccount.startingBalance
+      currentAccount.startingBalance,
+      reservedBuyCapital
     );
 
-    // Create trade record
+    // Create trade record — one trade per execution, linked to the order and execution.
     const trade: Trade = {
       id: generateTradeId(),
       timestamp: now,
       symbol: order.symbol,
       companyName: order.companyName,
       side: order.side,
-      quantity: order.quantity,
+      quantity: clampedFillQty,
       executionPrice: Number(executionPrice.toFixed(2)),
       totalValue: execution.totalValue,
       realizedPnL: order.side === 'SELL' ? Number(realizedGain.toFixed(2)) : null,
       orderId: order.id,
       executionId: execution.id,
-      orderType: order.type
+      orderType: order.type,
+      charges,
+      netValue
     };
 
-    return { execution, trade, newAccount, newHoldings };
-  }, []);
+    return { execution, trade, newAccount, newHoldings, filledQuantity, remainingQuantity, charges };
+  }, [activeTransactionCostConfig]);
 
   // ── placeOrder — central order creation ──
 
@@ -1139,54 +1209,40 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // MARKET order — execute immediately
     if (params.orderType === 'MARKET') {
-      const executionPrice = params.currentPrice;
-      const result = executeOrderInternal(order, executionPrice);
+      const stock = currentStocks.find(s => s.symbol === params.symbol);
+      const availableLiquidity = stock
+        ? computeAvailableTickLiquidity(stock, params.side, tickRef.current)
+        : Infinity;
 
-      // Finalize order
-      const executedOrder: Order = {
-        ...order,
-        executionPrice: Number(executionPrice.toFixed(2)),
-        totalValue: result.execution.totalValue,
-        status: 'EXECUTED' as OrderStatus,
-        executedAt: result.execution.executedAt
-      };
+      const fillQty = Math.min(params.quantity, availableLiquidity);
+      if (fillQty > 0) {
+        const { executionPrice: rawPrice } = computeSlippage(
+          params.currentPrice,
+          fillQty,
+          params.side,
+          availableLiquidity
+        );
+        const { executionPrice } = applyOrderTypePriceProtection(rawPrice, order, params.currentPrice);
 
-      // Apply all state updates
-      setOrders(prev => [executedOrder, ...prev]);
-      setExecutions(prev => [result.execution, ...prev]);
-      setTrades(prev => [result.trade, ...prev]);
-      setHoldings(result.newHoldings);
-      setAccount(result.newAccount);
+        const result = executeOrderInternal(order, executionPrice, fillQty);
 
-      addNotification(
-        'ORDER_EXECUTED',
-        'SUCCESS',
-        'Order Executed',
-        `${order.side} ${order.quantity} ${order.symbol} at ${formatINR(executionPrice)}`,
-        { symbol: order.symbol, orderId: order.id, tradeId: result.trade.id, route: '/orders' }
-      );
-
-      return { success: true, order: executedOrder, execution: result.execution };
-    }
-
-    // LIMIT order — check if it can execute immediately
-    if (params.orderType === 'LIMIT' && params.limitPrice !== undefined) {
-      const canExecuteNow =
-        (params.side === 'BUY' && params.currentPrice <= params.limitPrice) ||
-        (params.side === 'SELL' && params.currentPrice >= params.limitPrice);
-
-      if (canExecuteNow) {
-        const executionPrice = params.currentPrice;
-        const result = executeOrderInternal(order, executionPrice);
-
+        const isFull = result.remainingQuantity === 0;
         const executedOrder: Order = {
           ...order,
           executionPrice: Number(executionPrice.toFixed(2)),
           totalValue: result.execution.totalValue,
-          status: 'EXECUTED' as OrderStatus,
-          executedAt: result.execution.executedAt
+          status: (isFull ? 'EXECUTED' : 'PARTIALLY_FILLED') as OrderStatus,
+          executedAt: isFull ? result.execution.executedAt : null,
+          filledQuantity: result.filledQuantity,
+          remainingQuantity: result.remainingQuantity,
+          charges: aggregateOrderCharges(order.charges, result.charges),
+          netValue: result.trade.netValue
         };
 
+        // Apply all state updates
+        ordersRef.current = [executedOrder, ...ordersRef.current];
+        accountRef.current = result.newAccount;
+        holdingsRef.current = result.newHoldings;
         setOrders(prev => [executedOrder, ...prev]);
         setExecutions(prev => [result.execution, ...prev]);
         setTrades(prev => [result.trade, ...prev]);
@@ -1197,7 +1253,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           'ORDER_EXECUTED',
           'SUCCESS',
           'Order Executed',
-          `${order.side} ${order.quantity} ${order.symbol} at ${formatINR(executionPrice)}`,
+          `${order.side} ${fillQty} ${order.symbol} at ${formatINR(executionPrice)}${result.remainingQuantity > 0 ? ` (${result.remainingQuantity} remaining)` : ''}`,
           { symbol: order.symbol, orderId: order.id, tradeId: result.trade.id, route: '/orders' }
         );
 
@@ -1205,7 +1261,67 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    // LIMIT order — check if it can execute immediately
+    if (params.orderType === 'LIMIT' && params.limitPrice !== undefined) {
+      const canExecuteNow =
+        (params.side === 'BUY' && params.currentPrice <= params.limitPrice) ||
+        (params.side === 'SELL' && params.currentPrice >= params.limitPrice);
+
+      if (canExecuteNow) {
+        const stock = currentStocks.find(s => s.symbol === params.symbol);
+        const availableLiquidity = stock
+          ? computeAvailableTickLiquidity(stock, params.side, tickRef.current)
+          : Infinity;
+        const fillQty = Math.min(params.quantity, availableLiquidity);
+
+        if (fillQty > 0) {
+          const { executionPrice: rawPrice } = computeSlippage(
+            params.currentPrice,
+            fillQty,
+            params.side,
+            availableLiquidity
+          );
+          const { executionPrice } = applyOrderTypePriceProtection(rawPrice, order, params.currentPrice);
+
+          const result = executeOrderInternal(order, executionPrice, fillQty);
+
+          const isFull = result.remainingQuantity === 0;
+          const executedOrder: Order = {
+            ...order,
+            executionPrice: Number(executionPrice.toFixed(2)),
+            totalValue: result.execution.totalValue,
+            status: (isFull ? 'EXECUTED' : 'PARTIALLY_FILLED') as OrderStatus,
+            executedAt: isFull ? result.execution.executedAt : null,
+            filledQuantity: result.filledQuantity,
+            remainingQuantity: result.remainingQuantity,
+            charges: aggregateOrderCharges(order.charges, result.charges),
+            netValue: result.trade.netValue
+          };
+
+          ordersRef.current = [executedOrder, ...ordersRef.current];
+          accountRef.current = result.newAccount;
+          holdingsRef.current = result.newHoldings;
+          setOrders(prev => [executedOrder, ...prev]);
+          setExecutions(prev => [result.execution, ...prev]);
+          setTrades(prev => [result.trade, ...prev]);
+          setHoldings(result.newHoldings);
+          setAccount(result.newAccount);
+
+          addNotification(
+            'ORDER_EXECUTED',
+            'SUCCESS',
+            'Order Executed',
+            `${order.side} ${fillQty} ${order.symbol} at ${formatINR(executionPrice)}${result.remainingQuantity > 0 ? ` (${result.remainingQuantity} remaining)` : ''}`,
+            { symbol: order.symbol, orderId: order.id, tradeId: result.trade.id, route: '/orders' }
+          );
+
+          return { success: true, order: executedOrder, execution: result.execution };
+        }
+      }
+    }
+
     // LIMIT order — stays PENDING
+    ordersRef.current = [order, ...ordersRef.current];
     setOrders(prev => [order, ...prev]);
     return { success: true, order };
 
@@ -1310,7 +1426,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       executionPrice: Number(entryPrice.toFixed(2)),
       totalValue: result.execution.totalValue,
       status: 'EXECUTED' as OrderStatus,
-      executedAt: result.execution.executedAt
+      executedAt: result.execution.executedAt,
+      charges: aggregateOrderCharges(entryOrder.charges, result.charges),
+      netValue: result.trade.netValue
     };
 
     // 6. Entry executed — activate child exits
@@ -1380,6 +1498,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (matchingBracket) {
       const cancelRes = cancelEntryAndChildren(matchingBracket, currentOrders);
+      ordersRef.current = cancelRes.orders;
       setOrders(cancelRes.orders);
       setBracketGroups(prev => prev.map(bg => bg.id === matchingBracket.id ? cancelRes.bracketGroup : bg));
       addNotification(
@@ -1392,15 +1511,37 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: true };
     }
 
-    // Day 31.1: GTT-aware cancellation policy.
-    // Non-GTT orders retain the Day 11 rule: only PENDING → CANCELLED.
-    // GTT orders (PENDING or TRIGGERED) may be cancelled safely since no execution has occurred.
+    // Day 32: Cancellation policy — partially filled orders may also be cancelled.
+    // For GTT orders: PENDING, TRIGGERED, and PARTIALLY_FILLED are all allowed.
+    // For non-GTT orders: PENDING and PARTIALLY_FILLED are allowed (Day 11+32 fix).
     // Terminal states are never cancellable.
-    const cancelCheck = canCancelGttOrder(order);
-    if (!cancelCheck.allowed) {
+    const isGTT = order.isGTT ?? false;
+    const isTerminal = isTerminalStatus(order.status);
+    if (isTerminal) {
       return {
         success: false,
-        error: cancelCheck.reason ?? `Invalid cancel. Orders in ${order.status} state cannot be cancelled.`
+        error: `Invalid cancel. Orders in ${order.status} state cannot be cancelled.`
+      };
+    }
+
+    let allowed = false;
+
+    if (isGTT) {
+      // GTT: PENDING, TRIGGERED, and PARTIALLY_FILLED are allowed
+      if (order.status === 'PENDING' || order.status === 'TRIGGERED' || order.status === 'PARTIALLY_FILLED') {
+        allowed = true;
+      }
+    } else {
+      // Non-GTT: PENDING and PARTIALLY_FILLED are allowed; TRIGGERED is not
+      if (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED') {
+        allowed = true;
+      }
+    }
+
+    if (!allowed) {
+      return {
+        success: false,
+        error: `Invalid cancel. Orders in ${order.status} state cannot be cancelled.`
       };
     }
 
@@ -1410,7 +1551,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cancelledAt: new Date().toISOString()
     };
 
-    setOrders(prev => prev.map(o => o.id === orderId ? cancelledOrder : o));
+    const cancelledOrders = currentOrders.map(o => o.id === orderId ? cancelledOrder : o);
+    ordersRef.current = cancelledOrders;
+    setOrders(cancelledOrders);
     addNotification(
       'ORDER_CANCELLED',
       'INFO',
@@ -1420,6 +1563,69 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
     return { success: true };
   }, []);
+
+  // ── Day 32 Phase E: Advanced Order Modification ──
+
+  const modifyOrder = useCallback((params: ModifyOrderParams): ModifyOrderResult => {
+    const currentOrders = ordersRef.current;
+    const currentStocks = stocksRef.current;
+    const currentAccount = accountRef.current;
+    const currentHoldings = holdingsRef.current;
+    const currentBracketGroups = bracketGroupsRef.current;
+
+    const order = currentOrders.find(o => o.id === params.orderId);
+    if (!order) {
+      return { success: false, error: 'Order not found.' };
+    }
+
+    const validation = validateOrderModification(
+      params,
+      order,
+      currentAccount.cashBalance,
+      currentHoldings,
+      currentOrders,
+      currentStocks,
+      currentBracketGroups
+    );
+
+    if (!validation.valid) {
+      addNotification(
+        'ORDER_REJECTED',
+        'ERROR',
+        'Order Modification Failed',
+        validation.error ?? 'Validation failed.',
+        { symbol: order.symbol, orderId: order.id, route: '/orders' }
+      );
+      return { success: false, error: validation.error };
+    }
+
+    const nowIso = new Date().toISOString();
+    const nowEpoch = Date.now();
+    const modifiedOrder = applyOrderModification(order, params, nowIso, nowEpoch);
+
+    const updatedOrders = currentOrders.map(o => (o.id === order.id ? modifiedOrder : o));
+    ordersRef.current = updatedOrders;
+    setOrders(updatedOrders);
+
+    addNotification(
+      'ACCOUNT_EVENT',
+      'SUCCESS',
+      'Order Modified',
+      `${modifiedOrder.side} ${modifiedOrder.symbol} modified: Qty ${modifiedOrder.quantity}, Price ₹${modifiedOrder.requestedPrice}`,
+      { symbol: modifiedOrder.symbol, orderId: modifiedOrder.id, route: '/orders' }
+    );
+
+    return {
+      success: true,
+      order: modifiedOrder,
+      validationDetails: {
+        additionalCapitalRequired: validation.additionalCapitalRequired,
+        additionalHoldingsRequired: validation.additionalHoldingsRequired,
+        excessCapitalReleased: validation.excessCapitalReleased,
+        excessHoldingsReleased: validation.excessHoldingsReleased,
+      },
+    };
+  }, [addNotification]);
 
   // ── processPendingOrders ──
 
@@ -1433,7 +1639,24 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const currentOrders = ordersRef.current;
     const currentStocks = stocksRef.current;
 
-    const evaluatableOrders = currentOrders.filter(o => o.status === 'PENDING' || (o.status === 'TRIGGERED' && o.type === 'STOP_LIMIT'));
+    // Collect bracket order IDs to exclude from generic processing.
+    // Bracket orders are handled by the bracket OCO evaluation loop in simulateTick.
+    const bracketOrderIds = new Set<string>();
+    bracketGroupsRef.current.forEach(bg => {
+      bracketOrderIds.add(bg.parentOrderId);
+      bracketOrderIds.add(bg.stopLossOrderId);
+      bracketOrderIds.add(bg.targetOrderId);
+    });
+
+    // PENDING, TRIGGERED STOP_LIMIT, and PARTIALLY_FILLED orders are eligible for processing.
+    // Bracket orders are excluded — they are managed by the bracket engine.
+    // Day 32 Phase E: Sort eligible orders by priority queue timestamp (FIFO with priority resets).
+    const evaluatableOrders = sortOrdersByPriority(
+      currentOrders.filter(o =>
+        !bracketOrderIds.has(o.id) &&
+        (o.status === 'PENDING' || (o.status === 'TRIGGERED' && o.type === 'STOP_LIMIT') || o.status === 'PARTIALLY_FILLED')
+      )
+    );
 
     if (evaluatableOrders.length === 0) {
       isProcessingRef.current = false;
@@ -1449,6 +1672,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newExecutions: Execution[] = [];
     const newTrades: Trade[] = [];
 
+    // Day 32 Phase C: Track consumed tick liquidity per (symbol, side) to ensure
+    // multiple orders in the same tick share the finite available tick liquidity pool.
+    const consumedTickLiquidity = new Map<string, number>();
+
     for (const order of evaluatableOrders) {
       // Duplicate execution prevention: skip if already processed in this batch
       if (processedIds.has(order.id)) continue;
@@ -1457,7 +1684,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const orderIdx = updatedOrders.findIndex(o => o.id === order.id);
       if (orderIdx < 0) continue;
       let currentState = { ...updatedOrders[orderIdx] };
-      if (currentState.status !== 'PENDING' && currentState.status !== 'TRIGGERED') continue;
+      if (currentState.status !== 'PENDING' && currentState.status !== 'TRIGGERED' && currentState.status !== 'PARTIALLY_FILLED') continue;
 
       // Day 31.1: Expiry check (centralized in GttOrderEngine)
       if (isGttExpired(currentState)) {
@@ -1523,27 +1750,25 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         continue;
       }
 
-      // 3. Revalidate before execution (use centralized reservation model)
-      const revalidation = revalidateExecution(
-        currentState,
-        accountRef.current.cashBalance,
-        holdingsRef.current,
-        updatedOrders,  // Pass current working orders array so other pending orders' reservations are considered
-        currentStocks
-      );
+      // Day 32: Determine executable quantity using resource-aware computation.
+      // This supports partial fills: if full fill is not affordable,
+      // the maximum affordable quantity is filled and the order remains pending.
+      const financialFillQty = currentState.side === 'BUY'
+        ? computeExecutableBuyQuantity(currentState, currentPrice, accountRef.current.cashBalance, updatedOrders, currentStocks)
+        : computeExecutableSellQuantity(currentState, holdingsRef.current, updatedOrders);
 
-      if (!revalidation.valid) {
-        // Rejected — order goes to REJECTED state, no state mutation
+      if (financialFillQty <= 0) {
+        // Insufficient funds/holdings — reject the order.
         updatedOrders[orderIdx] = {
           ...currentState,
           status: 'REJECTED' as OrderStatus,
-          rejectionReason: revalidation.reason ?? 'Order validation failed at execution.'
+          rejectionReason: 'Insufficient available capital or holdings.'
         };
         addNotification(
           'ORDER_REJECTED',
           'ERROR',
           'Order Rejected',
-          `${currentState.side} ${currentState.quantity} ${currentState.symbol} — ${revalidation.reason ?? 'Order validation failed.'}`,
+          `${currentState.side} ${currentState.quantity} ${currentState.symbol} — insufficient available capital or holdings.`,
           { symbol: currentState.symbol, orderId: currentState.id, route: '/orders' }
         );
         processedIds.add(currentState.id);
@@ -1551,42 +1776,92 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         continue;
       }
 
-      // 4. Execute
-      const result = executeOrderInternal(currentState, currentPrice);
+      // Day 32 Phase C: Constrain by available tick liquidity.
+      // Daily traded volume is not the volume available in one simulation tick.
+      // Only a fraction (tickLiquidityRatio) of daily volume is executable per tick.
+      const liquidityKey = `${currentState.symbol}:${currentState.side}`;
+      const totalTickLiquidity = computeAvailableTickLiquidity(stock, currentState.side, tickRef.current);
+      const consumed = consumedTickLiquidity.get(liquidityKey) ?? 0;
+      const availableLiquidity = Math.max(0, totalTickLiquidity - consumed);
+      const liquidityFillQty = computeLiquidityConstrainedQuantity(financialFillQty, availableLiquidity);
 
-      // Update account/holdings refs for subsequent orders
-      accountRef.current = result.newAccount;
-      holdingsRef.current = result.newHoldings;
+      if (liquidityFillQty <= 0) {
+        // Tick liquidity temporarily exhausted — leave the order for the next tick.
+        // Do not reject — liquidity may return on a subsequent tick.
+        continue;
+      }
 
-      // Mark order executed in our local array
+      // Day 32 Phase C: Compute slippage-adjusted execution price.
+      // BUY slips upward (higher price), SELL slips downward (lower price).
+      const { executionPrice: rawPrice } = computeSlippage(currentPrice, liquidityFillQty, currentState.side, availableLiquidity);
+      const { executionPrice } = applyOrderTypePriceProtection(rawPrice, currentState, currentPrice);
+
+      // Re-check buying power at the slippage-adjusted price (BUY only; slippage raises cost).
+      let fillQty = liquidityFillQty;
+      if (currentState.side === 'BUY') {
+        const otherOrders = updatedOrders.filter(o => o.id !== currentState.id);
+        const reservedBuyCapital = computeReservedBuyCapital(otherOrders, currentStocks);
+        const availableBuyingPower = Math.max(0, accountRef.current.cashBalance - reservedBuyCapital);
+        const affordable = Math.floor(availableBuyingPower / executionPrice);
+        fillQty = Math.min(fillQty, affordable);
+      }
+
+      if (fillQty <= 0) {
+        // Slippage-adjusted price temporarily unaffordable — retry next tick.
+        continue;
+      }
+
+      // Execute the fill quantity at the slippage-adjusted price.
+      const result = executeOrderInternal(currentState, executionPrice, fillQty);
+      consumedTickLiquidity.set(liquidityKey, consumed + fillQty);
+
+      const { execution, trade, newAccount, newHoldings, filledQuantity, remainingQuantity } = result;
+
+      // Determine new order status.
+      const orderStatus = remainingQuantity === 0 ? 'EXECUTED' : 'PARTIALLY_FILLED';
+
+      // Compute cumulative totalValue for the order.
+      const prevTotalValue = currentState.totalValue ?? 0;
+      const newTotalValue = Number((prevTotalValue + execution.totalValue).toFixed(2));
+
+      // Update the order in the working array.
       updatedOrders[orderIdx] = {
         ...currentState,
         executionPrice: Number(currentPrice.toFixed(2)),
-        totalValue: result.execution.totalValue,
-        status: 'EXECUTED' as OrderStatus,
-        executedAt: result.execution.executedAt
+        totalValue: newTotalValue,
+        status: orderStatus,
+        filledQuantity,
+        remainingQuantity,
+        executedAt: remainingQuantity === 0 ? execution.executedAt : currentState.executedAt,
+        charges: aggregateOrderCharges(currentState.charges, result.charges),
+        netValue: Number((( currentState.netValue ?? 0) + (trade.netValue ?? 0)).toFixed(2))
       };
 
-      newExecutions.push(result.execution);
-      newTrades.push(result.trade);
+      // Update account/holdings refs for subsequent orders
+      accountRef.current = newAccount;
+      holdingsRef.current = newHoldings;
+
+      newExecutions.push(execution);
+      newTrades.push(trade);
 
       // Apply state immediately so next order in loop sees updated state
-      setHoldings(result.newHoldings);
-      setAccount(result.newAccount);
+      setHoldings(newHoldings);
+      setAccount(newAccount);
 
       addNotification(
         'ORDER_EXECUTED',
         'SUCCESS',
         'Order Executed',
-        `${currentState.side} ${currentState.quantity} ${currentState.symbol} at ${formatINR(currentPrice)}`,
-        { symbol: currentState.symbol, orderId: currentState.id, tradeId: result.trade.id, route: '/orders' }
+        `${currentState.side} ${fillQty} ${currentState.symbol} at ${formatINR(currentPrice)}${remainingQuantity > 0 ? ` (${remainingQuantity} remaining)` : ''}`,
+        { symbol: currentState.symbol, orderId: currentState.id, tradeId: trade.id, route: '/orders' }
       );
 
-      processedIds.add(order.id);
+      processedIds.add(currentState.id);
       executed++;
     }
 
     // Apply order/execution/trade state
+    ordersRef.current = updatedOrders;
     setOrders(updatedOrders);
     if (newExecutions.length > 0) {
       setExecutions(prev => [...newExecutions.reverse(), ...prev]);
@@ -1629,6 +1904,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const resetAccount = useCallback(() => {
     // Reset all React state to initial values
+    accountRef.current = INITIAL_ACCOUNT_STATE;
+    holdingsRef.current = [];
+    ordersRef.current = [];
+    bracketGroupsRef.current = [];
     setAccount(INITIAL_ACCOUNT_STATE);
     setWatchlist([]);
     setHoldings([]);
@@ -1893,8 +2172,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       holdingsRef.current,
       updatedStocks,
       accountRef.current.realizedPnL,
-      reservedBuyCapital,
-      accountRef.current.startingBalance
+      accountRef.current.startingBalance,
+      reservedBuyCapital
     );
     if (
       refreshedAccount.investedValue !== accountRef.current.investedValue ||
@@ -1972,6 +2251,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           totalValue: entryResult.execution.totalValue,
           status: 'EXECUTED' as OrderStatus,
           executedAt: entryResult.execution.executedAt,
+          charges: aggregateOrderCharges(parent.charges, entryResult.charges),
+          netValue: entryResult.trade.netValue
         };
 
         // Activate child exits
@@ -2034,7 +2315,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updatedStocks,
         accountRef.current,
         stockPrice,
-        winningLeg // force specific leg for BOTH case (tie-breaker)
+        winningLeg, // force specific leg for BOTH case (tie-breaker)
+        settingsRef.current.transactionCostsEnabled !== false ? DEFAULT_TRANSACTION_COST_CONFIG : undefined
       );
 
       if (!executionResult.success) {
@@ -2110,6 +2392,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
 
+  // Day 32 Phase D: Memoize transaction cost analytics from recorded trades
+  const transactionCostAnalytics = useMemo(
+    () => calculateTransactionCostAnalytics(trades),
+    [trades]
+  );
+
   return (
     <TradingContext.Provider value={{
       account,
@@ -2167,7 +2455,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       bracketPersistenceStatus,
       placeBracketOrder,
       // Day 31: GTT persistence status
-      gttPersistenceStatus
+      gttPersistenceStatus,
+      // Day 32 Phase D: Transaction cost analytics and config
+      transactionCostAnalytics,
+      transactionCostConfig: activeTransactionCostConfig,
+      // Day 32 Phase E: Advanced order modification
+      modifyOrder
     }}>
       {children}
     </TradingContext.Provider>
